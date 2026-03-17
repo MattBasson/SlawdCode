@@ -1,0 +1,26 @@
+version: "3.8"
+# SlawdCode — convenience compose file
+# Usage: podman-compose run --rm claude [claude-args]
+#    or: docker compose run --rm claude [claude-args]
+#
+# Authentication: run 'slawdcode-auth' (or 'make auth') before first use.
+# API key fallback: set ANTHROPIC_API_KEY in your shell or a .env file.
+
+services:
+  claude:
+    image: slawdcode:latest
+    environment:
+      # Only set if using API key fallback (OAuth preferred — see slawdcode-auth)
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+    volumes:
+      # Mount current project directory
+      - .:/workspace:z
+      # Mount host config/credentials directory (OAuth tokens live here)
+      - ${HOME}/.claude:/home/claude/.claude:z
+    working_dir: /workspace
+    stdin_open: true
+    tty: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL

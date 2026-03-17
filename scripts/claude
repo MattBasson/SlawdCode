@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# SlawdCode — run Claude Code securely in a rootless container
+# Linux / macOS / WSL2 wrapper
+set -euo pipefail
+
+# --- Configuration ---
+IMAGE="${SLAWDCODE_IMAGE:-slawdcode:latest}"
+RUNTIME="${SLAWDCODE_RUNTIME:-}"
+
+# Auto-detect container runtime (prefer podman for rootless operation)
+if [ -z "$RUNTIME" ]; then
+    if command -v podman &>/dev/null; then
+        RUNTIME="podman"
+    elif command -v docker &>/dev/null; then
+        RUNTIME="docker"
+    else
+        echo "Error: neither podman nor docker found." >&2
+        echo "  Linux/macOS: install Podman  https://podman.io/getting-started/installation" >&2
+        echo "  Windows:     install Podman Desktop or Docker Desktop" >&2
+        exit 1
+    fi
+fi
+
+# --- Volume mounts ---
+# $PWD       → /workspace            (your project — explicitly mounted, nothing else)
+# ~/.claude  → /home/claude/.claude  (OAuth credentials + config, persisted on host)
+HOST_CWD="$(pwd)"
+HOST_CONFIG="${HOME}/.claude"
+mkdir -p "$HOST_CONFIG"
+
+# --- Authentication ---
+# Preferred: OAuth tokens in ~/.claude (run 'slawdcode-auth' once to set up)
+# Fallback:  ANTHROPIC_API_KEY env var (for CI / automation only)
+ENV_ARGS=()
+if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+    ENV_ARGS+=(--env "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}")
+fi
+
+# --- Run ---
+exec "$RUNTIME" run \
+    --rm \
+    --interactive \
+    --tty \
+    "${ENV_ARGS[@]}" \
+    --volume "${HOST_CWD}:/workspace:z" \
+    --volume "${HOST_CONFIG}:/home/claude/.claude:z" \
+    --workdir /workspace \
+    --security-opt no-new-privileges \
+    --cap-drop ALL \
+    ${SLAWDCODE_EXTRA_ARGS:-} \
+    "$IMAGE" \
+    "$@"

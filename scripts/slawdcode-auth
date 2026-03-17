@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# SlawdCode — one-time OAuth authentication setup
+# Linux / macOS / WSL2
+#
+# Run this once. A browser window will open — sign in with your Anthropic account.
+# OAuth tokens are saved to ~/.claude/ on the HOST machine (never inside the container).
+# After this, you can run 'claude' without any API key.
+set -euo pipefail
+
+IMAGE="${SLAWDCODE_IMAGE:-slawdcode:latest}"
+RUNTIME="${SLAWDCODE_RUNTIME:-}"
+
+if [ -z "$RUNTIME" ]; then
+    if command -v podman &>/dev/null; then
+        RUNTIME="podman"
+    elif command -v docker &>/dev/null; then
+        RUNTIME="docker"
+    else
+        echo "Error: neither podman nor docker found." >&2
+        exit 1
+    fi
+fi
+
+HOST_CONFIG="${HOME}/.claude"
+mkdir -p "$HOST_CONFIG"
+
+echo "SlawdCode — Claude Code Authentication"
+echo "======================================="
+echo "A browser window will open. Sign in with your Anthropic account."
+echo "Your credentials will be saved to: $HOST_CONFIG"
+echo ""
+
+exec "$RUNTIME" run \
+    --rm \
+    --interactive \
+    --tty \
+    --volume "${HOST_CONFIG}:/home/claude/.claude:z" \
+    --security-opt no-new-privileges \
+    --cap-drop ALL \
+    ${SLAWDCODE_EXTRA_ARGS:-} \
+    "$IMAGE" \
+    auth login
