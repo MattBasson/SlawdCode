@@ -166,7 +166,7 @@ claude --help
 | Host filesystem exposure | Only explicitly mounted volumes (`$PWD` + `~/.claude`) |
 | API key on disk | OAuth preferred — tokens in `~/.claude/` on host, never in image |
 | API key in environment | Optional fallback only; OAuth avoids env vars entirely |
-| Image supply chain | Node.js Alpine base + npm install from official registry at build time |
+| Image supply chain | Node.js Alpine base + a small, pinned set of Alpine packages (`bash`, `git`, `coreutils`, `findutils`, `grep`, `sed`, `curl`, `jq`, `less`, `tar`, `ripgrep`, `openssh-client`, `ca-certificates`) + npm install from official registry at build time |
 | Network | Container has outbound access to api.anthropic.com (required by Claude Code) |
 
 ---
