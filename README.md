@@ -44,10 +44,10 @@ claude "explain this codebase"
 # 1. Clone and build the image
 git clone https://github.com/MattBasson/SlawdCode
 cd SlawdCode
-podman build -t slawdcode:latest .
+.\scripts\make.ps1 build
 
 # 2. Install the 'claude' command
-.\scripts\install.ps1
+.\scripts\make.ps1 install
 # Then add the install dir to your PATH if prompted
 
 # 3. Authenticate once (browser login — no API key stored on disk)
@@ -173,6 +173,8 @@ claude --help
 
 ## Make Targets
 
+### Linux / macOS / WSL2
+
 ```
 make build    Build the container image
 make auth     Authenticate with Claude (one-time OAuth login)
@@ -181,6 +183,21 @@ make run      Open an interactive Claude Code session in the current directory
 make clean    Remove the local container image
 make help     Show all available targets
 ```
+
+### Windows (PowerShell)
+
+PowerShell has no built-in `make`, so use the bundled wrapper which exposes the same targets:
+
+```powershell
+.\scripts\make.ps1 build     # Build the container image
+.\scripts\make.ps1 auth      # Authenticate with Claude (one-time OAuth login)
+.\scripts\make.ps1 install   # Install 'claude' and 'slawdcode-auth' commands
+.\scripts\make.ps1 run       # Open an interactive Claude Code session in the current directory
+.\scripts\make.ps1 clean     # Remove the local container image
+.\scripts\make.ps1 help      # Show all available targets
+```
+
+The same `SLAWDCODE_IMAGE` and `SLAWDCODE_RUNTIME` environment variables apply.
 
 ---
 
