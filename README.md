@@ -71,8 +71,9 @@ Run once — a browser window opens for you to sign in with your Anthropic accou
 slawdcode-auth
 
 # Windows (PowerShell)
-slawdcode-auth          # if installed, or:
-.\scripts\slawdcode-auth.ps1
+slawdcode-auth                    # if installed, or:
+.\scripts\make.ps1 auth           # via the make wrapper, or:
+.\scripts\slawdcode-auth.ps1      # direct script
 ```
 
 After this, every `claude` invocation automatically uses your stored credentials.
@@ -117,7 +118,14 @@ Everything else on your machine is invisible to the container.
 The container always installs the latest published version of `@anthropic-ai/claude-code` at **build time**. To get a newer version, rebuild the image:
 
 ```bash
+# Linux / macOS / WSL2
 make clean && make build
+```
+
+```powershell
+# Windows (PowerShell)
+.\scripts\make.ps1 clean
+.\scripts\make.ps1 build
 ```
 
 ---
@@ -213,11 +221,20 @@ podman-compose -f compose/podman-compose.yml run --rm claude --help
 docker compose -f compose/podman-compose.yml run --rm claude --help
 ```
 
+```powershell
+# Windows (PowerShell)
+podman-compose -f compose\podman-compose.yml run --rm claude --help
+
+# Or with Docker Compose
+docker compose -f compose\podman-compose.yml run --rm claude --help
+```
+
 ---
 
 ## Windows Notes
 
+- `scripts/make.ps1` is the PowerShell equivalent of the `Makefile` and exposes the same `build`, `auth`, `install`, `run`, `clean`, and `help` targets — Windows users do not need to install GNU make.
 - The PowerShell wrapper (`scripts/claude.ps1`) automatically converts Windows paths (e.g. `C:\Users\foo\project`) to Unix-style paths (`/c/Users/foo/project`) for volume mounts.
 - `.cmd` shims are installed alongside the `.ps1` scripts so `claude` and `slawdcode-auth` work from both **cmd.exe** and **PowerShell** without typing the extension.
-- WSL2 users can use the bash scripts (`scripts/claude`, `scripts/slawdcode-auth`) instead of the PowerShell ones.
+- WSL2 users can use the bash scripts (`scripts/claude`, `scripts/slawdcode-auth`) and the `Makefile` targets directly — there is no need for the PowerShell wrappers inside WSL2.
 - Ensure Podman Desktop (or Docker Desktop) is running before using the commands.
