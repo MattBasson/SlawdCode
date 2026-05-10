@@ -6,11 +6,32 @@
 #   .\install.ps1 [InstallDir]
 
 param(
-    [string]$InstallDir = (Join-Path $env:USERPROFILE '.local\bin')
+    [string]$InstallDir
 )
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
+
+# Determine the user's home directory portably. $env:USERPROFILE is the
+# usual Windows source but is empty in some session contexts (service
+# accounts, sandboxed shells, etc.), which previously broke the
+# Join-Path default for $InstallDir. Fall back to PowerShell's automatic
+# $HOME, then the .NET UserProfile folder, then $env:HOME.
+function Get-UserHome {
+    foreach ($candidate in @(
+        $env:USERPROFILE,
+        $HOME,
+        [Environment]::GetFolderPath('UserProfile'),
+        $env:HOME
+    )) {
+        if ($candidate) { return $candidate }
+    }
+    throw 'Could not determine user home directory. Set $HOME or $env:USERPROFILE.'
+}
+
+if (-not $InstallDir) {
+    $InstallDir = Join-Path (Get-UserHome) '.local\bin'
+}
 
 $RepoRaw = 'https://raw.githubusercontent.com/MattBasson/SlawdCode/main'
 
