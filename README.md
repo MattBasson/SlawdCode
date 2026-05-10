@@ -97,7 +97,7 @@ The API key is passed to the container at runtime only — it is **never** baked
 Your shell
   └─ claude (wrapper script)
        └─ podman run  [rootless, --cap-drop ALL, --no-new-privileges]
-            └─ container  [node:alpine, non-root user 'claude']
+            └─ container  [node:bookworm-slim, non-root user 'claude']
                  └─ @anthropic-ai/claude-code
                       └─ api.anthropic.com
 ```
@@ -110,6 +110,21 @@ Your shell
 | `~/.claude` | `/home/claude/.claude` | Config + OAuth credentials |
 
 Everything else on your machine is invisible to the container.
+
+---
+
+## Bundled Tools
+
+The container ships with a small, opinionated set of CLIs so Claude Code's in-session Bash tool can interact with the most common developer ecosystems:
+
+| Tool | Source | Purpose |
+|---|---|---|
+| `bash`, `git`, `curl`, `jq`, `less`, `tar`, `unzip`, `gnupg`, `ripgrep`, `openssh-client` | Debian apt | Standard userland Claude Code's Bash tool relies on |
+| `gh` | [cli.github.com](https://github.com/cli/cli) apt repo | GitHub CLI |
+| `az` | [packages.microsoft.com](https://learn.microsoft.com/cli/azure/install-azure-cli-linux) apt repo | Azure CLI |
+| `aws` | [awscli.amazonaws.com](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) zip distribution | AWS CLI v2 |
+
+> **Credentials are NOT persisted across runs.** Because the container is started with `--rm`, anything `gh auth login` / `az login` / `aws configure` writes to `/home/claude/.config/gh`, `/home/claude/.azure`, or `/home/claude/.aws` inside the container is discarded when the session ends. The host directories are not currently mounted; for short-lived sessions, set the matching environment variables instead (e.g. `GH_TOKEN`, `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, `AZURE_*`) via `SLAWDCODE_EXTRA_ARGS`.
 
 ---
 
@@ -174,7 +189,7 @@ claude --help
 | Host filesystem exposure | Only explicitly mounted volumes (`$PWD` + `~/.claude`) |
 | API key on disk | OAuth preferred — tokens in `~/.claude/` on host, never in image |
 | API key in environment | Optional fallback only; OAuth avoids env vars entirely |
-| Image supply chain | Node.js Alpine base + a small, pinned set of Alpine packages (`bash`, `git`, `coreutils`, `findutils`, `grep`, `sed`, `curl`, `jq`, `less`, `tar`, `ripgrep`, `openssh-client`, `ca-certificates`) + npm install from official registry at build time |
+| Image supply chain | Node.js Debian Bookworm-slim base + standard tooling (`bash`, `git`, `curl`, `gnupg`, `jq`, `less`, `tar`, `unzip`, `openssh-client`, `ripgrep`, `ca-certificates`) + cloud CLIs (`gh`, `az`, AWS CLI v2) installed from their official upstream repositories + npm install from official registry at build time |
 | Network | Container has outbound access to api.anthropic.com (required by Claude Code) |
 
 ---
