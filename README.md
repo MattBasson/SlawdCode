@@ -33,8 +33,8 @@ export PATH="$PATH:$HOME/.local/bin"   # add to ~/.bashrc or ~/.zshrc to make pe
 # 3. Authenticate once (browser login — no API key stored on disk)
 slawdcode-auth
 
-# 4. Run Claude Code
-claude --help
+# 4. Verify and run Claude Code
+claude --version
 claude "explain this codebase"
 ```
 
@@ -53,8 +53,8 @@ cd SlawdCode
 # 3. Authenticate once (browser login — no API key stored on disk)
 slawdcode-auth
 
-# 4. Run Claude Code
-claude --help
+# 4. Verify and run Claude Code
+claude --version
 claude "explain this codebase"
 ```
 
@@ -64,19 +64,19 @@ claude "explain this codebase"
 
 ### Preferred: OAuth browser login (recommended)
 
-Run once — a browser window opens for you to sign in with your Anthropic account. Credentials are stored on your **host machine** (in `~/.claude/` and `~/.claude.json`), never inside the container image.
+Run once per machine. A browser window opens for you to sign in with your Anthropic account. Tokens are written to your **host machine** (`~/.claude/` and `~/.claude.json`) and re-used by every subsequent `claude` invocation — they are never baked into the container image.
 
 ```bash
 # Linux / macOS / WSL2
 slawdcode-auth
-
-# Windows (PowerShell)
-slawdcode-auth                    # if installed, or:
-.\scripts\make.ps1 auth           # via the make wrapper, or:
-.\scripts\slawdcode-auth.ps1      # direct script
 ```
 
-After this, every `claude` invocation automatically uses your stored credentials.
+```powershell
+# Windows (PowerShell) — any of these work; pick one
+slawdcode-auth                    # if you ran 'make install' / .\scripts\make.ps1 install
+.\scripts\make.ps1 auth           # from a fresh clone, no install required
+.\scripts\slawdcode-auth.ps1      # the underlying script
+```
 
 ### Fallback: API key (CI / automation)
 
@@ -177,6 +177,8 @@ make clean && make build
 .\scripts\make.ps1 build
 ```
 
+> If a fresh image asks you to `/login` again after an update, Claude Code's on-disk auth layout has changed in the new release. Re-run `slawdcode-auth` once to refresh the host-side `~/.claude.json` token, then `claude` will pick it up on the next run.
+
 ---
 
 ## Configuration
@@ -219,10 +221,10 @@ claude --help
 | Concern | Mitigation |
 |---|---|
 | Root access on host | Podman runs rootless by default — no root required at all |
-| Root inside container | Non-root user `claude` created with `adduser -S` |
+| Root inside container | Non-root user `claude` created with `useradd --system` (system UID, no shell history, locked password) |
 | Privilege escalation | `--security-opt no-new-privileges` + `--cap-drop ALL` |
 | Host filesystem exposure | Only explicitly mounted volumes (`$PWD` + `~/.claude` + `~/.claude.json` by default; opt-in `~/.config/gh`, `~/.aws`, `~/.azure` when `SLAWDCODE_PERSIST_CLOUD_CREDS=1`) |
-| API key on disk | OAuth preferred — tokens in `~/.claude/` on host, never in image |
+| API key on disk | OAuth preferred — tokens in `~/.claude/` and `~/.claude.json` on host, never in image |
 | API key in environment | Optional fallback only; OAuth avoids env vars entirely |
 | Image supply chain | Node.js Debian Bookworm-slim base + standard tooling (`bash`, `git`, `curl`, `gnupg`, `jq`, `less`, `tar`, `unzip`, `openssh-client`, `ripgrep`, `ca-certificates`) + cloud CLIs (`gh`, `az`, AWS CLI v2) installed from their official upstream repositories + npm install from official registry at build time |
 | Network | Container has outbound access to api.anthropic.com (required by Claude Code) |
@@ -265,6 +267,7 @@ For users who prefer compose-style invocation:
 
 ```bash
 # Linux / macOS / WSL2
+touch ~/.claude.json                 # one-time: ensures the bind mount has a file source
 podman-compose -f compose/podman-compose.yml run --rm claude --help
 
 # Or with Docker Compose
@@ -273,11 +276,46 @@ docker compose -f compose/podman-compose.yml run --rm claude --help
 
 ```powershell
 # Windows (PowerShell)
+if (-not (Test-Path "$HOME\.claude.json")) { New-Item -ItemType File -Path "$HOME\.claude.json" | Out-Null }
 podman-compose -f compose\podman-compose.yml run --rm claude --help
 
 # Or with Docker Compose
 docker compose -f compose\podman-compose.yml run --rm claude --help
 ```
+
+The `slawdcode-auth` and `claude` wrapper scripts auto-create `~/.claude.json` if it's missing, but compose does not — without the touch step the runtime will create it as a *directory* the first time and break the OAuth login flow.
+
+---
+
+## Troubleshooting
+
+### Claude keeps prompting `/login` after a fresh build
+
+Claude Code stores its OAuth/login state in `~/.claude.json` on the host. If `slawdcode-auth` writes the token but the next `claude` invocation still asks you to `/login`, one of three things is usually wrong:
+
+1. The image is stale and predates the wrapper's `~/.claude.json` mount — `make clean && make build` (or `.\scripts\make.ps1 clean ; .\scripts\make.ps1 build`) and re-run `slawdcode-auth`.
+2. `~/.claude.json` exists on the host as an empty *directory* (the runtime created it on a previous run when the file was missing) — delete it (`rm -rf ~/.claude.json`) and re-run `slawdcode-auth`; the wrapper will recreate it as a file with mode 600.
+3. You're invoking `podman` / `docker` directly without the SlawdCode wrappers — make sure your `run` command includes both `--volume ~/.claude:/home/claude/.claude` *and* `--volume ~/.claude.json:/home/claude/.claude.json`.
+
+### `make.ps1 install` errors with `Cannot bind argument to parameter 'Path' because it is an empty string`
+
+`$env:USERPROFILE` is unset or empty in your PowerShell session (some service accounts and sandboxed shells hit this). The `.ps1` scripts now fall back through `$HOME` and `[Environment]::GetFolderPath('UserProfile')`, so updating to the latest version of the repo fixes it. If you still see the error, set `$env:USERPROFILE` (or `$HOME`) explicitly before invoking the script.
+
+### `Error: neither podman nor docker found`
+
+The wrappers auto-detect the runtime on `PATH`. Install Podman (Linux/macOS/WSL2) or Podman Desktop / Docker Desktop (macOS/Windows) and confirm with `podman --version` or `docker --version`. If both are installed and you want to force one, set `SLAWDCODE_RUNTIME=podman` or `SLAWDCODE_RUNTIME=docker`.
+
+### Permission denied on a mounted file
+
+On SELinux-enforcing hosts (RHEL/Fedora/CentOS), bind mounts need the `:z` label, which the wrappers already pass. If you're running `podman` directly without the wrappers, append `:z` to your `--volume` arguments. If `~/.claude.json` on your host is owned by a different user than the one running `podman`, fix the ownership (`chown $(id -u):$(id -g) ~/.claude.json`).
+
+### First `make build` is slow / image is large
+
+Expected. The image bundles bash + standard userland, GitHub CLI, Azure CLI, and AWS CLI v2 from upstream-official sources, plus the latest Claude Code from npm — final image is roughly 1 GB. Rebuilds are layer-cached and much faster.
+
+### `gh` / `aws` / `az` keep asking me to log in every session
+
+The cloud CLIs' credentials aren't persisted by default. Set `SLAWDCODE_PERSIST_CLOUD_CREDS=1` to mount `~/.config/gh`, `~/.aws`, and `~/.azure` from the host — see [Bundled Tools](#bundled-tools) for the full setup.
 
 ---
 
