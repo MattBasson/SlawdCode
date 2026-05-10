@@ -64,7 +64,7 @@ claude "explain this codebase"
 
 ### Preferred: OAuth browser login (recommended)
 
-Run once — a browser window opens for you to sign in with your Anthropic account. Credentials are stored in `~/.claude/` on your **host machine**, never inside the container image.
+Run once — a browser window opens for you to sign in with your Anthropic account. Credentials are stored on your **host machine** (in `~/.claude/` and `~/.claude.json`), never inside the container image.
 
 ```bash
 # Linux / macOS / WSL2
@@ -102,12 +102,13 @@ Your shell
                       └─ api.anthropic.com
 ```
 
-**By default, only two host directories are mounted into the container:**
+**By default, three host paths are mounted into the container:**
 
 | Host path | Container path | Purpose |
 |---|---|---|
 | `$PWD` (current dir) | `/workspace` | Your project files |
-| `~/.claude` | `/home/claude/.claude` | Config + OAuth credentials |
+| `~/.claude` | `/home/claude/.claude` | Project history, MCP server config |
+| `~/.claude.json` | `/home/claude/.claude.json` | Claude Code session + OAuth login state |
 
 When `SLAWDCODE_PERSIST_CLOUD_CREDS=1`, three additional **opt-in** mounts are added so the bundled cloud CLIs keep their auth state across runs:
 
@@ -220,7 +221,7 @@ claude --help
 | Root access on host | Podman runs rootless by default — no root required at all |
 | Root inside container | Non-root user `claude` created with `adduser -S` |
 | Privilege escalation | `--security-opt no-new-privileges` + `--cap-drop ALL` |
-| Host filesystem exposure | Only explicitly mounted volumes (`$PWD` + `~/.claude` by default; opt-in `~/.config/gh`, `~/.aws`, `~/.azure` when `SLAWDCODE_PERSIST_CLOUD_CREDS=1`) |
+| Host filesystem exposure | Only explicitly mounted volumes (`$PWD` + `~/.claude` + `~/.claude.json` by default; opt-in `~/.config/gh`, `~/.aws`, `~/.azure` when `SLAWDCODE_PERSIST_CLOUD_CREDS=1`) |
 | API key on disk | OAuth preferred — tokens in `~/.claude/` on host, never in image |
 | API key in environment | Optional fallback only; OAuth avoids env vars entirely |
 | Image supply chain | Node.js Debian Bookworm-slim base + standard tooling (`bash`, `git`, `curl`, `gnupg`, `jq`, `less`, `tar`, `unzip`, `openssh-client`, `ripgrep`, `ca-certificates`) + cloud CLIs (`gh`, `az`, AWS CLI v2) installed from their official upstream repositories + npm install from official registry at build time |

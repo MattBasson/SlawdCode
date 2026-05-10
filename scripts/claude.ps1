@@ -48,9 +48,18 @@ function Get-UserHome {
 
 # --- Volume mounts ---
 $HostCwd = (Get-Location).Path
-$HostConfig = Join-Path (Get-UserHome) '.claude'
+$UserHomeDir = Get-UserHome
+$HostConfig = Join-Path $UserHomeDir '.claude'
 if (-not (Test-Path $HostConfig)) {
     New-Item -ItemType Directory -Path $HostConfig | Out-Null
+}
+# Bind-mounting a single file requires the source to exist. Recent Claude
+# Code releases store the OAuth login state in ~/.claude.json, so without
+# this file mount the token is written inside the --rm container and lost
+# when the session ends.
+$HostSession = Join-Path $UserHomeDir '.claude.json'
+if (-not (Test-Path $HostSession)) {
+    New-Item -ItemType File -Path $HostSession | Out-Null
 }
 
 # Convert Windows paths to Unix-style paths for container volume mounts
@@ -59,14 +68,16 @@ function ConvertTo-UnixPath([string]$WinPath) {
     $WinPath -replace '\\', '/' -replace '^([A-Za-z]):', { '/' + $_.Groups[1].Value.ToLower() }
 }
 
-$HostCwdUnix    = ConvertTo-UnixPath $HostCwd
-$HostConfigUnix = ConvertTo-UnixPath $HostConfig
+$HostCwdUnix     = ConvertTo-UnixPath $HostCwd
+$HostConfigUnix  = ConvertTo-UnixPath $HostConfig
+$HostSessionUnix = ConvertTo-UnixPath $HostSession
 
 # --- Build run arguments ---
 $RunArgs = @(
     'run', '--rm', '--interactive', '--tty',
     '--volume', "${HostCwdUnix}:/workspace:z",
     '--volume', "${HostConfigUnix}:/home/claude/.claude:z",
+    '--volume', "${HostSessionUnix}:/home/claude/.claude.json:z",
     '--workdir', '/workspace',
     '--security-opt', 'no-new-privileges',
     '--cap-drop', 'ALL'

@@ -22,15 +22,24 @@ if [ -z "$RUNTIME" ]; then
 fi
 
 # --- Volume mounts ---
-# $PWD       → /workspace            (your project — explicitly mounted, nothing else)
-# ~/.claude  → /home/claude/.claude  (OAuth credentials + config, persisted on host)
+# $PWD            → /workspace                   (your project — explicitly mounted, nothing else)
+# ~/.claude       → /home/claude/.claude         (project history, MCP config, etc.)
+# ~/.claude.json  → /home/claude/.claude.json    (Claude Code session + login state)
 HOST_CWD="$(pwd)"
 HOST_CONFIG="${HOME}/.claude"
+HOST_SESSION="${HOME}/.claude.json"
 mkdir -p "$HOST_CONFIG"
+# Bind-mounting a single file requires the source to exist; touch it on first
+# run so the OAuth tokens that 'claude auth login' writes here are persisted
+# back to the host instead of being lost when the --rm container exits.
+if [ ! -e "$HOST_SESSION" ]; then
+    (umask 077 && : > "$HOST_SESSION")
+fi
 
 VOLUME_ARGS=(
     --volume "${HOST_CWD}:/workspace:z"
     --volume "${HOST_CONFIG}:/home/claude/.claude:z"
+    --volume "${HOST_SESSION}:/home/claude/.claude.json:z"
 )
 
 # --- Optional: cloud CLI credential persistence ---

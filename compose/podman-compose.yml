@@ -15,8 +15,12 @@ services:
     volumes:
       # Mount current project directory
       - .:/workspace:z
-      # Mount host config/credentials directory (OAuth tokens live here)
+      # Mount host config directory (project history, MCP server config, etc.)
       - ${HOME}/.claude:/home/claude/.claude:z
+      # Mount the host session/login-state file so OAuth tokens persist.
+      # Touch ~/.claude.json on the host before first 'compose run' if it
+      # does not already exist, otherwise compose will create it as a dir.
+      - ${HOME}/.claude.json:/home/claude/.claude.json:z
     working_dir: /workspace
     stdin_open: true
     tty: true

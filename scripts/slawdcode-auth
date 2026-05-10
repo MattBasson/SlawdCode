@@ -22,12 +22,22 @@ if [ -z "$RUNTIME" ]; then
 fi
 
 HOST_CONFIG="${HOME}/.claude"
+HOST_SESSION="${HOME}/.claude.json"
 mkdir -p "$HOST_CONFIG"
+# Bind-mounting a single file requires the source to exist. Recent Claude
+# Code releases store the OAuth login state in ~/.claude.json (not inside
+# the ~/.claude/ directory), so without this file mount the token is
+# written to a path inside the --rm container and lost on exit.
+if [ ! -e "$HOST_SESSION" ]; then
+    (umask 077 && : > "$HOST_SESSION")
+fi
 
 echo "SlawdCode — Claude Code Authentication"
 echo "======================================="
 echo "A browser window will open. Sign in with your Anthropic account."
-echo "Your credentials will be saved to: $HOST_CONFIG"
+echo "Your credentials will be saved to:"
+echo "  $HOST_CONFIG"
+echo "  $HOST_SESSION"
 echo ""
 
 exec "$RUNTIME" run \
@@ -35,6 +45,7 @@ exec "$RUNTIME" run \
     --interactive \
     --tty \
     --volume "${HOST_CONFIG}:/home/claude/.claude:z" \
+    --volume "${HOST_SESSION}:/home/claude/.claude.json:z" \
     --security-opt no-new-privileges \
     --cap-drop ALL \
     ${SLAWDCODE_EXTRA_ARGS:-} \
