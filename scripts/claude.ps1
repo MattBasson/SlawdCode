@@ -62,10 +62,16 @@ if (-not (Test-Path $HostSession)) {
     New-Item -ItemType File -Path $HostSession | Out-Null
 }
 
-# Convert Windows paths to Unix-style paths for container volume mounts
-# e.g. C:\Users\foo\project → /c/Users/foo/project
+# Convert Windows paths to a form both Podman Desktop and Docker Desktop
+# accept reliably: forward slashes with the drive letter intact, e.g.
+#   C:\Users\foo\project   →   C:/Users/foo/project
+# Previously we lowercased and rewrote drive letters as '/c/Users/...'
+# (the Git-Bash/MSYS form). That works in some Docker Desktop builds but
+# not Podman Desktop's WSL2 backend, which interprets it as a Unix path
+# under /c and silently mounts an empty location — the most likely cause
+# of "slawdcode-auth succeeds but the next claude run prompts /login".
 function ConvertTo-UnixPath([string]$WinPath) {
-    $WinPath -replace '\\', '/' -replace '^([A-Za-z]):', { '/' + $_.Groups[1].Value.ToLower() }
+    $WinPath -replace '\\', '/'
 }
 
 $HostCwdUnix     = ConvertTo-UnixPath $HostCwd
@@ -118,6 +124,27 @@ if ($env:SLAWDCODE_EXTRA_ARGS) {
 
 $RunArgs += $Image
 if ($ClaudeArgs) { $RunArgs += $ClaudeArgs }
+
+# --- Optional debug ---
+# SLAWDCODE_DEBUG=1 prints the resolved host paths and the full runtime
+# command before executing — useful when troubleshooting "auth doesn't
+# persist" issues, where the most common cause is a host path that
+# doesn't resolve correctly through the container runtime's bind mount.
+if ($env:SLAWDCODE_DEBUG -match '^(?i:1|true|yes)$') {
+    Write-Host '--- SlawdCode debug ---' -ForegroundColor Cyan
+    Write-Host ("Runtime:      {0}" -f $Runtime)
+    Write-Host ("Image:        {0}" -f $Image)
+    Write-Host ("HostCwd:      {0}  ->  {1}" -f $HostCwd, $HostCwdUnix)
+    Write-Host ("HostConfig:   {0}  ->  {1}" -f $HostConfig, $HostConfigUnix)
+    Write-Host ("HostSession:  {0}  ->  {1}" -f $HostSession, $HostSessionUnix)
+    if (Test-Path $HostSession) {
+        $info = Get-Item $HostSession
+        Write-Host ("HostSession size: {0} bytes, last write: {1}" -f $info.Length, $info.LastWriteTime)
+    }
+    Write-Host "Command:"
+    Write-Host ("  {0} {1}" -f $Runtime, ($RunArgs -join ' '))
+    Write-Host '-----------------------' -ForegroundColor Cyan
+}
 
 & $Runtime @RunArgs
 exit $LASTEXITCODE

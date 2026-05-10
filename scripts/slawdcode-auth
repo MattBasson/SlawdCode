@@ -40,6 +40,19 @@ echo "  $HOST_CONFIG"
 echo "  $HOST_SESSION"
 echo ""
 
+case "${SLAWDCODE_DEBUG:-}" in
+    1|true|TRUE|yes|YES)
+        {
+            echo "--- SlawdCode debug ---"
+            echo "Runtime:      $RUNTIME"
+            echo "Image:        $IMAGE"
+            echo "HostConfig:   $HOST_CONFIG"
+            echo "HostSession:  $HOST_SESSION"
+            echo "-----------------------"
+        } >&2
+        ;;
+esac
+
 exec "$RUNTIME" run \
     --rm \
     --interactive \

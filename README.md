@@ -316,11 +316,19 @@ The `slawdcode-auth` and `claude` wrapper scripts auto-create `~/.claude.json` i
 
 ### Claude keeps prompting `/login` after a fresh build
 
-Claude Code stores its OAuth/login state in `~/.claude.json` on the host. If `slawdcode-auth` writes the token but the next `claude` invocation still asks you to `/login`, one of three things is usually wrong:
+Claude Code stores its OAuth/login state in `~/.claude.json` on the host. If `slawdcode-auth` writes the token but the next `claude` invocation still asks you to `/login`, one of these is usually wrong:
 
 1. The image is stale and predates the wrapper's `~/.claude.json` mount — `make clean && make build` (or `.\scripts\make.ps1 clean ; .\scripts\make.ps1 build`) and re-run `slawdcode-auth`.
 2. `~/.claude.json` exists on the host as an empty *directory* (the runtime created it on a previous run when the file was missing) — delete it (`rm -rf ~/.claude.json`) and re-run `slawdcode-auth`; the wrapper will recreate it as a file with mode 600.
-3. You're invoking `podman` / `docker` directly without the SlawdCode wrappers — make sure your `run` command includes both `--volume ~/.claude:/home/claude/.claude` *and* `--volume ~/.claude.json:/home/claude/.claude.json`.
+3. **(Windows / Podman Desktop)** Your host path didn't translate correctly into the container's bind mount. Run with `SLAWDCODE_DEBUG=1` to see the resolved paths and the exact `podman run` command:
+
+   ```powershell
+   $env:SLAWDCODE_DEBUG = '1'
+   slawdcode-auth     # then re-run claude with the same env var set
+   ```
+
+   The printed `HostSession` line should be `C:/Users/<you>/.claude.json` (forward slashes, drive letter preserved). The older `/c/Users/...` form was changed in this commit because Podman Desktop's WSL2 backend treats it as a Unix path under `/c` and silently mounts an empty source — make sure the version of the wrappers you installed (`~/.local/bin\claude.ps1` or wherever `make install` put them) has been refreshed since this fix landed.
+4. You're invoking `podman` / `docker` directly without the SlawdCode wrappers — make sure your `run` command includes both `--volume ~/.claude:/home/claude/.claude` *and* `--volume ~/.claude.json:/home/claude/.claude.json`.
 
 ### `make.ps1 install` errors with `Cannot bind argument to parameter 'Path' because it is an empty string`
 
