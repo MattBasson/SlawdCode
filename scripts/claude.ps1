@@ -72,6 +72,28 @@ $RunArgs = @(
     '--cap-drop', 'ALL'
 )
 
+# --- Optional: cloud CLI credential persistence ---
+# When SLAWDCODE_PERSIST_CLOUD_CREDS is truthy, also mount the host config
+# directories for the bundled cloud CLIs (gh, aws, az) so authentication
+# survives across 'claude' invocations. Host directories are created if
+# they do not already exist.
+$PersistRaw = if ($env:SLAWDCODE_PERSIST_CLOUD_CREDS) { $env:SLAWDCODE_PERSIST_CLOUD_CREDS } else { '' }
+if ($PersistRaw -match '^(?i:1|true|yes)$') {
+    $UserHome = Get-UserHome
+    $CloudMounts = @(
+        @{ Host = (Join-Path $UserHome '.config\gh'); Container = '/home/claude/.config/gh' },
+        @{ Host = (Join-Path $UserHome '.aws');       Container = '/home/claude/.aws' },
+        @{ Host = (Join-Path $UserHome '.azure');     Container = '/home/claude/.azure' }
+    )
+    foreach ($m in $CloudMounts) {
+        if (-not (Test-Path $m.Host)) {
+            New-Item -ItemType Directory -Path $m.Host -Force | Out-Null
+        }
+        $HostUnix = ConvertTo-UnixPath $m.Host
+        $RunArgs += @('--volume', "${HostUnix}:$($m.Container):z")
+    }
+}
+
 # Authentication — OAuth preferred (run slawdcode-auth.ps1 once to set up)
 # Fallback: ANTHROPIC_API_KEY for CI / automation only
 if ($env:ANTHROPIC_API_KEY) {

@@ -102,12 +102,20 @@ Your shell
                       └─ api.anthropic.com
 ```
 
-**Only two host directories are ever mounted into the container:**
+**By default, only two host directories are mounted into the container:**
 
 | Host path | Container path | Purpose |
 |---|---|---|
 | `$PWD` (current dir) | `/workspace` | Your project files |
 | `~/.claude` | `/home/claude/.claude` | Config + OAuth credentials |
+
+When `SLAWDCODE_PERSIST_CLOUD_CREDS=1`, three additional **opt-in** mounts are added so the bundled cloud CLIs keep their auth state across runs:
+
+| Host path | Container path | Purpose |
+|---|---|---|
+| `~/.config/gh` | `/home/claude/.config/gh` | GitHub CLI auth (`gh auth login`) |
+| `~/.aws` | `/home/claude/.aws` | AWS CLI credentials and config |
+| `~/.azure` | `/home/claude/.azure` | Azure CLI auth (`az login`) |
 
 Everything else on your machine is invisible to the container.
 
@@ -124,7 +132,32 @@ The container ships with a small, opinionated set of CLIs so Claude Code's in-se
 | `az` | [packages.microsoft.com](https://learn.microsoft.com/cli/azure/install-azure-cli-linux) apt repo | Azure CLI |
 | `aws` | [awscli.amazonaws.com](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) zip distribution | AWS CLI v2 |
 
-> **Credentials are NOT persisted across runs.** Because the container is started with `--rm`, anything `gh auth login` / `az login` / `aws configure` writes to `/home/claude/.config/gh`, `/home/claude/.azure`, or `/home/claude/.aws` inside the container is discarded when the session ends. The host directories are not currently mounted; for short-lived sessions, set the matching environment variables instead (e.g. `GH_TOKEN`, `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, `AZURE_*`) via `SLAWDCODE_EXTRA_ARGS`.
+**By default, credentials are NOT persisted across runs.** Because the container is started with `--rm`, anything `gh auth login` / `az login` / `aws configure` writes to `/home/claude/.config/gh`, `/home/claude/.azure`, or `/home/claude/.aws` inside the container is discarded when the session ends.
+
+**To persist them, set `SLAWDCODE_PERSIST_CLOUD_CREDS=1`** before invoking `claude`. The wrapper will mount the matching host directories (`~/.config/gh`, `~/.aws`, `~/.azure`) into the container — creating them on the host if they don't already exist — so `gh auth login` / `az login` / `aws configure` survive across runs.
+
+```bash
+# Linux / macOS / WSL2 (bash, zsh)
+export SLAWDCODE_PERSIST_CLOUD_CREDS=1     # for the current shell
+claude
+
+# To make it permanent across new shells, add the export line to one of:
+#   ~/.bashrc          (bash, interactive non-login)
+#   ~/.bash_profile    (bash, login)
+#   ~/.zshrc           (zsh, interactive)
+#   ~/.zprofile        (zsh, login — common on macOS)
+```
+
+```powershell
+# Windows (PowerShell)
+$env:SLAWDCODE_PERSIST_CLOUD_CREDS = '1'   # for the current session
+claude
+
+# To make it permanent for all future PowerShell sessions for your user:
+[Environment]::SetEnvironmentVariable('SLAWDCODE_PERSIST_CLOUD_CREDS', '1', 'User')
+```
+
+Alternatively, for short-lived or CI sessions, pass tokens via environment variables (e.g. `GH_TOKEN`, `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, `AZURE_*`) using `SLAWDCODE_EXTRA_ARGS`.
 
 ---
 
@@ -154,6 +187,7 @@ All configuration is done via environment variables:
 | `SLAWDCODE_IMAGE` | `slawdcode:latest` | Container image to use |
 | `SLAWDCODE_RUNTIME` | auto-detect | `podman` or `docker` |
 | `SLAWDCODE_EXTRA_ARGS` | _(empty)_ | Extra flags passed to `podman run` / `docker run` |
+| `SLAWDCODE_PERSIST_CLOUD_CREDS` | _(empty)_ | Set to `1` / `true` / `yes` to mount `~/.config/gh`, `~/.aws`, and `~/.azure` so `gh`, `aws`, and `az` auth persists across runs (host dirs are auto-created) |
 | `ANTHROPIC_API_KEY` | _(empty)_ | API key fallback (CI/automation only) |
 
 ### Enterprise / Proxy
@@ -186,7 +220,7 @@ claude --help
 | Root access on host | Podman runs rootless by default — no root required at all |
 | Root inside container | Non-root user `claude` created with `adduser -S` |
 | Privilege escalation | `--security-opt no-new-privileges` + `--cap-drop ALL` |
-| Host filesystem exposure | Only explicitly mounted volumes (`$PWD` + `~/.claude`) |
+| Host filesystem exposure | Only explicitly mounted volumes (`$PWD` + `~/.claude` by default; opt-in `~/.config/gh`, `~/.aws`, `~/.azure` when `SLAWDCODE_PERSIST_CLOUD_CREDS=1`) |
 | API key on disk | OAuth preferred — tokens in `~/.claude/` on host, never in image |
 | API key in environment | Optional fallback only; OAuth avoids env vars entirely |
 | Image supply chain | Node.js Debian Bookworm-slim base + standard tooling (`bash`, `git`, `curl`, `gnupg`, `jq`, `less`, `tar`, `unzip`, `openssh-client`, `ripgrep`, `ca-certificates`) + cloud CLIs (`gh`, `az`, AWS CLI v2) installed from their official upstream repositories + npm install from official registry at build time |
