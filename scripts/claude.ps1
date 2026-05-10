@@ -30,9 +30,25 @@ Neither podman nor docker found.
     }
 }
 
+# Determine the user's home directory portably. $env:USERPROFILE is the
+# usual Windows source but is empty in some session contexts (service
+# accounts, sandboxed shells, etc.), so fall back through PowerShell's
+# automatic $HOME, the .NET UserProfile folder, and $env:HOME.
+function Get-UserHome {
+    foreach ($candidate in @(
+        $env:USERPROFILE,
+        $HOME,
+        [Environment]::GetFolderPath('UserProfile'),
+        $env:HOME
+    )) {
+        if ($candidate) { return $candidate }
+    }
+    throw 'Could not determine user home directory. Set $HOME or $env:USERPROFILE.'
+}
+
 # --- Volume mounts ---
 $HostCwd = (Get-Location).Path
-$HostConfig = Join-Path $env:USERPROFILE '.claude'
+$HostConfig = Join-Path (Get-UserHome) '.claude'
 if (-not (Test-Path $HostConfig)) {
     New-Item -ItemType Directory -Path $HostConfig | Out-Null
 }
