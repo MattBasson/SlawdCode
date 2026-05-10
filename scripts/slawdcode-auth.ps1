@@ -43,23 +43,39 @@ function Get-UserHome {
     throw 'Could not determine user home directory. Set $HOME or $env:USERPROFILE.'
 }
 
-$HostConfig = Join-Path (Get-UserHome) '.claude'
+$UserHomeDir = Get-UserHome
+$HostConfig = Join-Path $UserHomeDir '.claude'
 if (-not (Test-Path $HostConfig)) {
     New-Item -ItemType Directory -Path $HostConfig | Out-Null
 }
+# Bind-mounting a single file requires the source to exist. Recent Claude
+# Code releases store the OAuth login state in ~/.claude.json, so without
+# this file mount the token is written inside the --rm container and lost
+# when the session ends.
+$HostSession = Join-Path $UserHomeDir '.claude.json'
+if (-not (Test-Path $HostSession)) {
+    New-Item -ItemType File -Path $HostSession | Out-Null
+}
 
-# Convert Windows path to Unix-style for container volume mount
-$HostConfigUnix = $HostConfig -replace '\\', '/' -replace '^([A-Za-z]):', { '/' + $_.Groups[1].Value.ToLower() }
+# Convert Windows paths to Unix-style for container volume mounts
+function ConvertTo-UnixPath([string]$WinPath) {
+    $WinPath -replace '\\', '/' -replace '^([A-Za-z]):', { '/' + $_.Groups[1].Value.ToLower() }
+}
+$HostConfigUnix  = ConvertTo-UnixPath $HostConfig
+$HostSessionUnix = ConvertTo-UnixPath $HostSession
 
 Write-Host 'SlawdCode — Claude Code Authentication'
 Write-Host '======================================='
 Write-Host 'A browser window will open. Sign in with your Anthropic account.'
-Write-Host "Your credentials will be saved to: $HostConfig"
+Write-Host 'Your credentials will be saved to:'
+Write-Host "  $HostConfig"
+Write-Host "  $HostSession"
 Write-Host ''
 
 $RunArgs = @(
     'run', '--rm', '--interactive', '--tty',
     '--volume', "${HostConfigUnix}:/home/claude/.claude:z",
+    '--volume', "${HostSessionUnix}:/home/claude/.claude.json:z",
     '--security-opt', 'no-new-privileges',
     '--cap-drop', 'ALL'
 )
