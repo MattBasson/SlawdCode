@@ -28,6 +28,30 @@ HOST_CWD="$(pwd)"
 HOST_CONFIG="${HOME}/.claude"
 mkdir -p "$HOST_CONFIG"
 
+VOLUME_ARGS=(
+    --volume "${HOST_CWD}:/workspace:z"
+    --volume "${HOST_CONFIG}:/home/claude/.claude:z"
+)
+
+# --- Optional: cloud CLI credential persistence ---
+# When SLAWDCODE_PERSIST_CLOUD_CREDS is truthy, also mount the host config
+# directories for the bundled cloud CLIs (gh, aws, az) so authentication
+# survives across `claude` invocations. The directories are created on the
+# host if they do not already exist.
+case "${SLAWDCODE_PERSIST_CLOUD_CREDS:-}" in
+    1|true|TRUE|yes|YES)
+        for spec in \
+            "${HOME}/.config/gh:/home/claude/.config/gh" \
+            "${HOME}/.aws:/home/claude/.aws" \
+            "${HOME}/.azure:/home/claude/.azure"
+        do
+            host_dir="${spec%%:*}"
+            mkdir -p "$host_dir"
+            VOLUME_ARGS+=(--volume "${spec}:z")
+        done
+        ;;
+esac
+
 # --- Authentication ---
 # Preferred: OAuth tokens in ~/.claude (run 'slawdcode-auth' once to set up)
 # Fallback:  ANTHROPIC_API_KEY env var (for CI / automation only)
@@ -42,8 +66,7 @@ exec "$RUNTIME" run \
     --interactive \
     --tty \
     "${ENV_ARGS[@]}" \
-    --volume "${HOST_CWD}:/workspace:z" \
-    --volume "${HOST_CONFIG}:/home/claude/.claude:z" \
+    "${VOLUME_ARGS[@]}" \
     --workdir /workspace \
     --security-opt no-new-privileges \
     --cap-drop ALL \
