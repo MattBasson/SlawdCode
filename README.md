@@ -132,11 +132,32 @@ The container ships with a small, opinionated set of CLIs so Claude Code's in-se
 | `az` | [packages.microsoft.com](https://learn.microsoft.com/cli/azure/install-azure-cli-linux) apt repo | Azure CLI |
 | `aws` | [awscli.amazonaws.com](https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html) zip distribution | AWS CLI v2 |
 
-> **By default, credentials are NOT persisted across runs.** Because the container is started with `--rm`, anything `gh auth login` / `az login` / `aws configure` writes to `/home/claude/.config/gh`, `/home/claude/.azure`, or `/home/claude/.aws` inside the container is discarded when the session ends.
->
-> **To persist them, set `SLAWDCODE_PERSIST_CLOUD_CREDS=1`** before invoking `claude`. The wrapper will mount the matching host directories (`~/.config/gh`, `~/.aws`, `~/.azure`) into the container — creating them on the host if they don't already exist — so `gh auth login` / `az login` / `aws configure` survive across runs.
->
-> Alternatively, for short-lived or CI sessions, pass tokens via environment variables (e.g. `GH_TOKEN`, `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, `AZURE_*`) using `SLAWDCODE_EXTRA_ARGS`.
+**By default, credentials are NOT persisted across runs.** Because the container is started with `--rm`, anything `gh auth login` / `az login` / `aws configure` writes to `/home/claude/.config/gh`, `/home/claude/.azure`, or `/home/claude/.aws` inside the container is discarded when the session ends.
+
+**To persist them, set `SLAWDCODE_PERSIST_CLOUD_CREDS=1`** before invoking `claude`. The wrapper will mount the matching host directories (`~/.config/gh`, `~/.aws`, `~/.azure`) into the container — creating them on the host if they don't already exist — so `gh auth login` / `az login` / `aws configure` survive across runs.
+
+```bash
+# Linux / macOS / WSL2 (bash, zsh)
+export SLAWDCODE_PERSIST_CLOUD_CREDS=1     # for the current shell
+claude
+
+# To make it permanent across new shells, add the export line to one of:
+#   ~/.bashrc          (bash, interactive non-login)
+#   ~/.bash_profile    (bash, login)
+#   ~/.zshrc           (zsh, interactive)
+#   ~/.zprofile        (zsh, login — common on macOS)
+```
+
+```powershell
+# Windows (PowerShell)
+$env:SLAWDCODE_PERSIST_CLOUD_CREDS = '1'   # for the current session
+claude
+
+# To make it permanent for all future PowerShell sessions for your user:
+[Environment]::SetEnvironmentVariable('SLAWDCODE_PERSIST_CLOUD_CREDS', '1', 'User')
+```
+
+Alternatively, for short-lived or CI sessions, pass tokens via environment variables (e.g. `GH_TOKEN`, `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`, `AZURE_*`) using `SLAWDCODE_EXTRA_ARGS`.
 
 ---
 
