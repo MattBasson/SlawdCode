@@ -162,9 +162,36 @@ Alternatively, for short-lived or CI sessions, pass tokens via environment varia
 
 ---
 
-## Updating Claude Code
+## Updating
 
-The container always installs the latest published version of `@anthropic-ai/claude-code` at **build time**. To get a newer version, rebuild the image:
+There are two things you might want to update: **SlawdCode itself** (this repo — wrappers, `Containerfile`, bundled tooling) and the underlying **Claude Code** package (refreshed automatically at every image build via `npm install -g @anthropic-ai/claude-code`).
+
+### Updating SlawdCode
+
+Pull the latest source, rebuild the image, and reinstall the wrappers:
+
+```bash
+# Linux / macOS / WSL2
+cd /path/to/SlawdCode
+git pull
+make clean && make build      # rebuild image (also pulls the latest Claude Code from npm)
+make install                  # refresh the 'claude' and 'slawdcode-auth' wrappers in ~/.local/bin
+```
+
+```powershell
+# Windows (PowerShell)
+cd C:\path\to\SlawdCode
+git pull
+.\scripts\make.ps1 clean
+.\scripts\make.ps1 build
+.\scripts\make.ps1 install
+```
+
+> If the rebuilt image asks you to `/login` again, Claude Code's on-disk auth layout has changed between releases. Re-run `slawdcode-auth` once to refresh the host-side `~/.claude.json` token, then `claude` will pick it up on the next run.
+
+### Updating only Claude Code
+
+If you don't need newer SlawdCode wrappers or `Containerfile` changes, skip the `git pull` and rebuild in place — every `make build` re-runs `npm install -g @anthropic-ai/claude-code`, which fetches the latest published version:
 
 ```bash
 # Linux / macOS / WSL2
@@ -176,8 +203,6 @@ make clean && make build
 .\scripts\make.ps1 clean
 .\scripts\make.ps1 build
 ```
-
-> If a fresh image asks you to `/login` again after an update, Claude Code's on-disk auth layout has changed in the new release. Re-run `slawdcode-auth` once to refresh the host-side `~/.claude.json` token, then `claude` will pick it up on the next run.
 
 ---
 
