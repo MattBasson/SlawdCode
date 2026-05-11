@@ -328,6 +328,8 @@ Claude Code stores its OAuth access/refresh tokens in `~/.claude/.credentials.js
 
 1. The image is stale and predates the wrapper's bind mounts — `make clean && make build` (or `.\scripts\make.ps1 clean ; .\scripts\make.ps1 build`) and re-run `slawdcode-auth`.
 2. Either `~/.claude.json` or `~/.claude/.credentials.json` exists on the host as an empty *directory* (the runtime created it on a previous run when the file was missing) — delete both (`rm -rf ~/.claude.json ~/.claude/.credentials.json`) and re-run `slawdcode-auth`; the wrappers recreate each as a 600-perm file initialized with `{}`.
+
+> **Windows / Podman Desktop / Docker Desktop note:** Claude Code's `auth login` writes `.credentials.json` using an atomic-rename pattern that doesn't survive a bind mount across the WSL2 → 9p → NTFS path. `slawdcode-auth` works around this by running the auth flow in a *named* container and then using `podman cp` / `docker cp` to extract the credentials file directly — which uses a different file-extraction path than bind mounts and reliably lands the bytes on the host. If your access token eventually expires and the in-session refresh write fails (same root cause), just re-run `slawdcode-auth`.
 3. **(Windows / Podman Desktop)** Your host path didn't translate correctly into the container's bind mount. Run with `SLAWDCODE_DEBUG=1` to see the resolved paths and the exact `podman run` command:
 
    ```powershell
