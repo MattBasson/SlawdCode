@@ -329,7 +329,23 @@ Claude Code stores its OAuth access/refresh tokens in `~/.claude/.credentials.js
 1. The image is stale and predates the wrapper's bind mounts — `make clean && make build` (or `.\scripts\make.ps1 clean ; .\scripts\make.ps1 build`) and re-run `slawdcode-auth`.
 2. Either `~/.claude.json` or `~/.claude/.credentials.json` exists on the host as an empty *directory* (the runtime created it on a previous run when the file was missing) — delete both (`rm -rf ~/.claude.json ~/.claude/.credentials.json`) and re-run `slawdcode-auth`; the wrappers recreate each as a 600-perm file initialized with `{}`.
 
-> **Windows / Podman Desktop / Docker Desktop note:** Claude Code's `auth login` writes `.credentials.json` using an atomic-rename pattern that doesn't survive a bind mount across the WSL2 → 9p → NTFS path. `slawdcode-auth` works around this by running the auth flow in a *named* container and then using `podman cp` / `docker cp` to extract the credentials file directly — which uses a different file-extraction path than bind mounts and reliably lands the bytes on the host. If your access token eventually expires and the in-session refresh write fails (same root cause), just re-run `slawdcode-auth`.
+> **Windows / Podman Desktop / Docker Desktop note:** Claude Code's `auth login` writes `.credentials.json` using an atomic-rename pattern that doesn't survive a bind mount across the WSL2 → 9p → NTFS path. `slawdcode-auth` works around this by running the auth flow in a *named* container and then using `podman cp` / `docker cp` to extract the credentials file directly — which uses a different file-extraction path than bind mounts.
+>
+> If even the `cp` workaround fails (the wrapper prints `Warning: '<runtime> cp' did not deliver .credentials.json to the host.`), the named container is left in place so you can extract the file manually, and the OAuth flow may genuinely not be persistable on your runtime/host combo. **The most reliable workaround in that case is to skip OAuth entirely:**
+>
+> ```powershell
+> # Windows (PowerShell) — get an API key from your Anthropic console
+> $env:ANTHROPIC_API_KEY = 'sk-ant-...'
+> claude
+> ```
+>
+> ```bash
+> # Linux / macOS / WSL2
+> export ANTHROPIC_API_KEY='sk-ant-...'
+> claude
+> ```
+>
+> The API key is passed straight through `--env` and never written to disk by the container. For enterprise plans with "API Usage Billing" (the same plan that supports OAuth via SlawdCode), an API key from your org console is the most reliable auth path on Windows hosts.
 3. **(Windows / Podman Desktop)** Your host path didn't translate correctly into the container's bind mount. Run with `SLAWDCODE_DEBUG=1` to see the resolved paths and the exact `podman run` command:
 
    ```powershell

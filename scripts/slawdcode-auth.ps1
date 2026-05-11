@@ -133,31 +133,71 @@ try {
     & $Runtime @RunArgs
     $authExit = $LASTEXITCODE
 } finally {
-    # Best-effort extract regardless of exit status: even on Ctrl-C the
-    # device-code flow may have already written tokens.
-    try {
-        & $Runtime cp "${AuthContainer}:/home/claude/.claude/.credentials.json" $HostCreds 2>$null
+    # Attempt to extract .credentials.json from the named container. On
+    # Podman Desktop / Windows we've seen 'podman cp' silently fail with
+    # the Windows-style destination path, so try multiple formats and
+    # capture stderr for diagnosis.
+    $HostCredsUnix = ConvertTo-UnixPath $HostCreds
+    $cpAttempts = @(
+        @{ Label = 'Windows-style path';    Dest = $HostCreds     },
+        @{ Label = 'Forward-slash path';    Dest = $HostCredsUnix }
+    )
+    $extractStatus = 1
+    $lastOutput = ''
+    foreach ($attempt in $cpAttempts) {
+        $output = & $Runtime cp `
+            "${AuthContainer}:/home/claude/.claude/.credentials.json" `
+            $attempt.Dest 2>&1
         $extractStatus = $LASTEXITCODE
-    } catch {
-        $extractStatus = 1
+        $lastOutput = ($output | Out-String).Trim()
+        if ($env:SLAWDCODE_DEBUG -match '^(?i:1|true|yes)$') {
+            Write-Host ("`n[debug] '$Runtime cp ... {0}' -> exit {1}" -f $attempt.Label, $extractStatus) -ForegroundColor Cyan
+            if ($lastOutput) { Write-Host "[debug] output: $lastOutput" -ForegroundColor Cyan }
+        }
+        if ($extractStatus -eq 0 -and (Test-Path $HostCreds) -and (Get-Item $HostCreds).Length -gt 3) {
+            break
+        }
     }
 
-    if ($extractStatus -ne 0) {
+    if ($extractStatus -ne 0 -or -not (Test-Path $HostCreds) -or (Get-Item $HostCreds).Length -le 3) {
         Write-Host ''
-        Write-Host 'Warning: could not copy .credentials.json out of the auth container.' -ForegroundColor Yellow
-        Write-Host '         The OAuth login probably did not complete. Re-run slawdcode-auth.' -ForegroundColor Yellow
+        Write-Host "Warning: '$Runtime cp' did not deliver .credentials.json to the host." -ForegroundColor Yellow
+        if ($lastOutput) {
+            Write-Host "         Last error: $lastOutput" -ForegroundColor Yellow
+        }
+        Write-Host '         Recovery options:' -ForegroundColor Yellow
+        Write-Host '           1. Re-run slawdcode-auth (transient errors usually clear).' -ForegroundColor Yellow
+        Write-Host '           2. Manually extract:' -ForegroundColor Yellow
+        Write-Host ("                $Runtime cp '${AuthContainer}:/home/claude/.claude/.credentials.json' '$HostCreds'") -ForegroundColor Yellow
+        Write-Host '              (the named container above is left in place if this happens, so the file is still inside it).' -ForegroundColor Yellow
+        Write-Host '           3. Bypass OAuth entirely by setting ANTHROPIC_API_KEY before running ''claude''.' -ForegroundColor Yellow
+        Write-Host '              See the README "Authentication / Fallback: API key" section.' -ForegroundColor Yellow
+
+        # Restore a placeholder so the regular 'claude' wrapper's bind
+        # mount has a file source even after a failed extraction.
+        if (-not (Test-Path $HostCreds) -or (Get-Item $HostCreds).Length -eq 0) {
+            [System.IO.File]::WriteAllText($HostCreds, '{}')
+        }
     }
 
-    # Belt-and-suspenders: if the bind mount didn't capture ~/.claude.json
-    # either, fall back to extracting it via cp too.
+    # Belt-and-suspenders: if the bind-mounted ~/.claude.json stayed at
+    # the 2-byte placeholder, fall back to extracting it via cp too.
     if ((Get-Item $HostSession -ErrorAction SilentlyContinue) -and (Get-Item $HostSession).Length -le 3) {
         try {
             & $Runtime cp "${AuthContainer}:/home/claude/.claude.json" $HostSession 2>$null
         } catch { }
     }
 
-    # Always remove the named container.
-    try { & $Runtime rm -f $AuthContainer 2>$null | Out-Null } catch { }
+    # Always remove the named container, EXCEPT when the cp failed —
+    # leaving the container behind lets the user run their own
+    # 'podman cp' against it to diagnose / recover. They can remove
+    # the container manually with: podman rm <name>
+    if ($extractStatus -eq 0) {
+        try { & $Runtime rm -f $AuthContainer 2>$null | Out-Null } catch { }
+    } else {
+        Write-Host ("`nThe auth container '$AuthContainer' has been left in place so you can inspect or extract its contents.") -ForegroundColor Cyan
+        Write-Host ("Remove it manually when done: $Runtime rm -f $AuthContainer") -ForegroundColor Cyan
+    }
 }
 
 exit $authExit
