@@ -69,6 +69,29 @@ if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
     ENV_ARGS+=(--env "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}")
 fi
 
+# --- Optional debug ---
+# SLAWDCODE_DEBUG=1 prints the resolved host paths and the full runtime
+# command before executing — useful when troubleshooting "auth doesn't
+# persist" issues.
+case "${SLAWDCODE_DEBUG:-}" in
+    1|true|TRUE|yes|YES)
+        {
+            echo "--- SlawdCode debug ---"
+            echo "Runtime:      $RUNTIME"
+            echo "Image:        $IMAGE"
+            echo "HostCwd:      $HOST_CWD"
+            echo "HostConfig:   $HOST_CONFIG"
+            echo "HostSession:  $HOST_SESSION"
+            if [ -f "$HOST_SESSION" ]; then
+                echo "HostSession size: $(wc -c < "$HOST_SESSION") bytes, modified: $(date -r "$HOST_SESSION" 2>/dev/null || stat -f '%Sm' "$HOST_SESSION" 2>/dev/null)"
+            fi
+            echo "Command:"
+            echo "  $RUNTIME run --rm --interactive --tty ${ENV_ARGS[*]} ${VOLUME_ARGS[*]} --workdir /workspace --security-opt no-new-privileges --cap-drop ALL ${SLAWDCODE_EXTRA_ARGS:-} $IMAGE $*"
+            echo "-----------------------"
+        } >&2
+        ;;
+esac
+
 # --- Run ---
 exec "$RUNTIME" run \
     --rm \

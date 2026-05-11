@@ -57,9 +57,13 @@ if (-not (Test-Path $HostSession)) {
     New-Item -ItemType File -Path $HostSession | Out-Null
 }
 
-# Convert Windows paths to Unix-style for container volume mounts
+# Convert Windows paths to a Podman/Docker-friendly form: forward slashes
+# with the drive letter intact (e.g. C:/Users/foo/.claude.json). The
+# previous '/c/Users/...' form (Git-Bash/MSYS style) is interpreted as a
+# Unix path under /c by Podman Desktop's WSL2 backend and silently mounts
+# an empty source — the most likely cause of "auth doesn't persist".
 function ConvertTo-UnixPath([string]$WinPath) {
-    $WinPath -replace '\\', '/' -replace '^([A-Za-z]):', { '/' + $_.Groups[1].Value.ToLower() }
+    $WinPath -replace '\\', '/'
 }
 $HostConfigUnix  = ConvertTo-UnixPath $HostConfig
 $HostSessionUnix = ConvertTo-UnixPath $HostSession
@@ -85,6 +89,21 @@ if ($env:SLAWDCODE_EXTRA_ARGS) {
 }
 
 $RunArgs += $Image, 'auth', 'login'
+
+# Optional debug: print the resolved host paths and the full runtime
+# command. Useful when the next 'claude' run keeps prompting /login —
+# verify the paths printed here match the files Get-ChildItem $HOME\.claude*
+# shows after the auth flow completes.
+if ($env:SLAWDCODE_DEBUG -match '^(?i:1|true|yes)$') {
+    Write-Host '--- SlawdCode debug ---' -ForegroundColor Cyan
+    Write-Host ("Runtime:      {0}" -f $Runtime)
+    Write-Host ("Image:        {0}" -f $Image)
+    Write-Host ("HostConfig:   {0}  ->  {1}" -f $HostConfig, $HostConfigUnix)
+    Write-Host ("HostSession:  {0}  ->  {1}" -f $HostSession, $HostSessionUnix)
+    Write-Host "Command:"
+    Write-Host ("  {0} {1}" -f $Runtime, ($RunArgs -join ' '))
+    Write-Host '-----------------------' -ForegroundColor Cyan
+}
 
 & $Runtime @RunArgs
 exit $LASTEXITCODE
