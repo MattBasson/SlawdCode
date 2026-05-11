@@ -106,30 +106,58 @@ auth_status=0
     "$IMAGE" \
     auth login || auth_status=$?
 
-# Extract the credentials file from the now-stopped container. Use the
-# runtime's cp, which writes via the runtime's file-extraction path
-# (bypasses the WSL2/9p/NTFS bind-mount issue). On macOS / Linux this
-# also works fine and is equivalent.
+# Extract the credentials file from the now-stopped container. Capture
+# both stdout and stderr so failures (especially on Podman Desktop /
+# Windows where 'podman cp' can behave unexpectedly) are visible.
 extract_status=0
-"$RUNTIME" cp \
+cp_output=$("$RUNTIME" cp \
     "${AUTH_CONTAINER}:/home/claude/.claude/.credentials.json" \
-    "$HOST_CREDS" 2>/dev/null || extract_status=$?
+    "$HOST_CREDS" 2>&1) || extract_status=$?
 
-if [ "$extract_status" -ne 0 ]; then
+if [ "$extract_status" -ne 0 ] || [ ! -s "$HOST_CREDS" ] || [ "$(wc -c < "$HOST_CREDS")" -le 3 ]; then
     echo "" >&2
-    echo "Warning: could not copy .credentials.json out of the auth container." >&2
-    echo "         The OAuth login probably did not complete. Re-run slawdcode-auth." >&2
+    echo "Warning: '$RUNTIME cp' did not deliver .credentials.json to the host." >&2
+    if [ -n "$cp_output" ]; then
+        echo "         Last output: $cp_output" >&2
+    fi
+    echo "         Recovery options:" >&2
+    echo "           1. Re-run slawdcode-auth (transient errors usually clear)." >&2
+    echo "           2. Manually extract:" >&2
+    echo "                $RUNTIME cp '${AUTH_CONTAINER}:/home/claude/.claude/.credentials.json' '$HOST_CREDS'" >&2
+    echo "              (the named container is left in place when extraction fails)." >&2
+    echo "           3. Bypass OAuth entirely by setting ANTHROPIC_API_KEY before running 'claude'." >&2
+    echo "              See the README 'Authentication / Fallback: API key' section." >&2
+
+    # Restore the placeholder so the regular 'claude' wrapper has a
+    # file source for its bind mount.
+    if [ ! -s "$HOST_CREDS" ]; then
+        (umask 077 && printf '{}\n' > "$HOST_CREDS")
+    fi
+
+    extraction_failed=1
+else
+    extraction_failed=0
 fi
 chmod 600 "$HOST_CREDS" 2>/dev/null || true
 
-# Some auth flows also rewrite ~/.claude.json. The bind mount already
-# captured that, but re-extract as a belt-and-suspenders fallback if the
-# bind mount swallowed the write too.
+# Belt-and-suspenders fallback for ~/.claude.json
 host_session_size=$(wc -c < "$HOST_SESSION" 2>/dev/null || echo 0)
 if [ "$host_session_size" -le 3 ]; then
     "$RUNTIME" cp \
         "${AUTH_CONTAINER}:/home/claude/.claude.json" \
         "$HOST_SESSION" 2>/dev/null || true
+fi
+
+# Leave the named container in place when extraction failed so the user
+# can recover by running 'podman cp' themselves; remove it on success.
+if [ "${extraction_failed:-0}" -eq 0 ]; then
+    trap - EXIT
+    cleanup
+else
+    trap - EXIT INT TERM
+    echo "" >&2
+    echo "The auth container '$AUTH_CONTAINER' has been left in place so you can inspect or extract its contents." >&2
+    echo "Remove it manually when done: $RUNTIME rm -f $AUTH_CONTAINER" >&2
 fi
 
 exit "$auth_status"
