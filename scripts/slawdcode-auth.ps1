@@ -48,16 +48,23 @@ $HostConfig = Join-Path $UserHomeDir '.claude'
 if (-not (Test-Path $HostConfig)) {
     New-Item -ItemType Directory -Path $HostConfig | Out-Null
 }
-# Initialize with '{}' (valid empty-object JSON) rather than a zero-byte
-# file: Claude Code parses ~/.claude.json on startup and refuses to run
-# if it isn't valid JSON, so a 0-byte placeholder triggers a
-# "Configuration Error / Unexpected EOF" prompt before the auth flow
-# can begin.
+# Initialize ~/.claude.json with '{}' (valid empty-object JSON) — Claude
+# Code parses it on startup and refuses to run on invalid JSON, so a
+# 0-byte placeholder triggers a "Configuration Error / Unexpected EOF"
+# prompt before the auth flow can begin.
 $HostSession = Join-Path $UserHomeDir '.claude.json'
 if (-not (Test-Path $HostSession) -or (Get-Item $HostSession).Length -eq 0) {
-    # WriteAllText (no BOM) avoids UTF-8 BOM issues some Claude Code
-    # versions hit when parsing JSON.
     [System.IO.File]::WriteAllText($HostSession, '{}')
+}
+# Separately bind-mount ~/.claude/.credentials.json (the OAuth tokens
+# Claude Code writes after a successful auth login). On Podman/Docker
+# Desktop on Windows, brand-new files at the root of a directory bind
+# mount over the WSL2→9p→NTFS path do not reliably reach the host, so
+# .credentials.json never persists. Pre-creating it on the host and
+# bind-mounting it directly forces the single-file mount path.
+$HostCreds = Join-Path $HostConfig '.credentials.json'
+if (-not (Test-Path $HostCreds) -or (Get-Item $HostCreds).Length -eq 0) {
+    [System.IO.File]::WriteAllText($HostCreds, '{}')
 }
 
 # Convert Windows paths to a Podman/Docker-friendly form: forward slashes
@@ -70,6 +77,7 @@ function ConvertTo-UnixPath([string]$WinPath) {
 }
 $HostConfigUnix  = ConvertTo-UnixPath $HostConfig
 $HostSessionUnix = ConvertTo-UnixPath $HostSession
+$HostCredsUnix   = ConvertTo-UnixPath $HostCreds
 
 Write-Host 'SlawdCode — Claude Code Authentication'
 Write-Host '======================================='
@@ -77,12 +85,14 @@ Write-Host 'A browser window will open. Sign in with your Anthropic account.'
 Write-Host 'Your credentials will be saved to:'
 Write-Host "  $HostConfig"
 Write-Host "  $HostSession"
+Write-Host "  $HostCreds"
 Write-Host ''
 
 $RunArgs = @(
     'run', '--rm', '--interactive', '--tty',
     '--volume', "${HostConfigUnix}:/home/claude/.claude:z",
     '--volume', "${HostSessionUnix}:/home/claude/.claude.json:z",
+    '--volume', "${HostCredsUnix}:/home/claude/.claude/.credentials.json:z",
     '--security-opt', 'no-new-privileges',
     '--cap-drop', 'ALL'
 )
@@ -103,6 +113,7 @@ if ($env:SLAWDCODE_DEBUG -match '^(?i:1|true|yes)$') {
     Write-Host ("Image:        {0}" -f $Image)
     Write-Host ("HostConfig:   {0}  ->  {1}" -f $HostConfig, $HostConfigUnix)
     Write-Host ("HostSession:  {0}  ->  {1}" -f $HostSession, $HostSessionUnix)
+    Write-Host ("HostCreds:    {0}  ->  {1}" -f $HostCreds, $HostCredsUnix)
     Write-Host "Command:"
     Write-Host ("  {0} {1}" -f $Runtime, ($RunArgs -join ' '))
     Write-Host '-----------------------' -ForegroundColor Cyan

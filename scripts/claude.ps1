@@ -60,9 +60,20 @@ if (-not (Test-Path $HostConfig)) {
 # before the auth flow can begin.
 $HostSession = Join-Path $UserHomeDir '.claude.json'
 if (-not (Test-Path $HostSession) -or (Get-Item $HostSession).Length -eq 0) {
-    # -NoNewline + ASCII keeps the file BOM-free; some Claude Code
-    # versions also choke on a UTF-8 BOM at the start of the JSON.
+    # WriteAllText is BOM-free; Claude Code's JSON parser dislikes BOMs.
     [System.IO.File]::WriteAllText($HostSession, '{}')
+}
+
+# Separately bind-mount ~/.claude/.credentials.json (the OAuth tokens
+# Claude Code writes after a successful 'auth login'). On Podman-Desktop /
+# Docker-Desktop on Windows, brand-new files at the root of a directory
+# bind mount through the WSL2→9p→NTFS path don't reliably reach the host,
+# so a freshly-created .credentials.json never appears on disk. Pre-
+# creating the file and binding it directly forces the single-file mount
+# code path, the same one that already works for ~/.claude.json.
+$HostCreds = Join-Path $HostConfig '.credentials.json'
+if (-not (Test-Path $HostCreds) -or (Get-Item $HostCreds).Length -eq 0) {
+    [System.IO.File]::WriteAllText($HostCreds, '{}')
 }
 
 # Convert Windows paths to a form both Podman Desktop and Docker Desktop
@@ -80,6 +91,7 @@ function ConvertTo-UnixPath([string]$WinPath) {
 $HostCwdUnix     = ConvertTo-UnixPath $HostCwd
 $HostConfigUnix  = ConvertTo-UnixPath $HostConfig
 $HostSessionUnix = ConvertTo-UnixPath $HostSession
+$HostCredsUnix   = ConvertTo-UnixPath $HostCreds
 
 # --- Build run arguments ---
 $RunArgs = @(
@@ -87,6 +99,7 @@ $RunArgs = @(
     '--volume', "${HostCwdUnix}:/workspace:z",
     '--volume', "${HostConfigUnix}:/home/claude/.claude:z",
     '--volume', "${HostSessionUnix}:/home/claude/.claude.json:z",
+    '--volume', "${HostCredsUnix}:/home/claude/.claude/.credentials.json:z",
     '--workdir', '/workspace',
     '--security-opt', 'no-new-privileges',
     '--cap-drop', 'ALL'
@@ -143,6 +156,11 @@ if ($env:SLAWDCODE_DEBUG -match '^(?i:1|true|yes)$') {
     if (Test-Path $HostSession) {
         $info = Get-Item $HostSession
         Write-Host ("HostSession size: {0} bytes, last write: {1}" -f $info.Length, $info.LastWriteTime)
+    }
+    Write-Host ("HostCreds:    {0}  ->  {1}" -f $HostCreds, $HostCredsUnix)
+    if (Test-Path $HostCreds) {
+        $info = Get-Item $HostCreds
+        Write-Host ("HostCreds size:   {0} bytes, last write: {1}" -f $info.Length, $info.LastWriteTime)
     }
     Write-Host "Command:"
     Write-Host ("  {0} {1}" -f $Runtime, ($RunArgs -join ' '))

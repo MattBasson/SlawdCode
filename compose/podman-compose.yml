@@ -17,10 +17,15 @@ services:
       - .:/workspace:z
       # Mount host config directory (project history, MCP server config, etc.)
       - ${HOME}/.claude:/home/claude/.claude:z
-      # Mount the host session/login-state file so OAuth tokens persist.
-      # Touch ~/.claude.json on the host before first 'compose run' if it
-      # does not already exist, otherwise compose will create it as a dir.
+      # Mount the host session-metadata file (Claude Code parses this on
+      # startup; pre-create with '{}' if missing — see README troubleshooting).
       - ${HOME}/.claude.json:/home/claude/.claude.json:z
+      # Mount the OAuth credentials file directly. On Windows-backed bind
+      # mounts (Podman/Docker Desktop) a brand-new file at the root of the
+      # directory mount above doesn't reliably reach the host; mounting the
+      # file explicitly forces the single-file persistence path. Pre-create
+      # with '{}' if missing (see README troubleshooting).
+      - ${HOME}/.claude/.credentials.json:/home/claude/.claude/.credentials.json:z
     working_dir: /workspace
     stdin_open: true
     tty: true

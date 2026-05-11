@@ -23,19 +23,29 @@ fi
 
 HOST_CONFIG="${HOME}/.claude"
 HOST_SESSION="${HOME}/.claude.json"
+HOST_CREDS="${HOST_CONFIG}/.credentials.json"
 mkdir -p "$HOST_CONFIG"
-# Bind-mounting a single file requires the source to exist. Recent Claude
-# Code releases store the OAuth login state in ~/.claude.json (not inside
-# the ~/.claude/ directory), so without this file mount the token is
-# written to a path inside the --rm container and lost on exit.
-# Initialize with '{}' (valid empty-object JSON) rather than a zero-byte
-# file: Claude Code parses ~/.claude.json on startup and refuses to run if
-# the file isn't valid JSON, so a 0-byte placeholder triggers a
-# "Configuration Error / Unexpected EOF" prompt before the auth flow
-# can begin.
+
+# Bind-mounting a single file requires the source to exist. Initialize
+# ~/.claude.json with '{}' (valid empty-object JSON) rather than a
+# zero-byte file: Claude Code parses it on startup and refuses to run on
+# invalid JSON, so a 0-byte placeholder triggers a "Configuration Error /
+# Unexpected EOF" prompt before the auth flow can begin.
 if [ ! -s "$HOST_SESSION" ]; then
     (umask 077 && printf '{}\n' > "$HOST_SESSION")
 fi
+
+# Separately bind-mount ~/.claude/.credentials.json (where Claude Code
+# writes its OAuth access/refresh tokens). On Podman-Desktop /
+# Docker-Desktop on Windows, brand-new files created at the root of a
+# directory bind mount over the WSL2→9p→NTFS path don't reliably reach
+# the host — pre-creating the host file and binding it directly forces
+# the persisted-path code path, the same one that already works for
+# ~/.claude.json.
+if [ ! -s "$HOST_CREDS" ]; then
+    (umask 077 && printf '{}\n' > "$HOST_CREDS")
+fi
+chmod 600 "$HOST_CREDS" 2>/dev/null || true
 
 echo "SlawdCode — Claude Code Authentication"
 echo "======================================="
@@ -43,6 +53,7 @@ echo "A browser window will open. Sign in with your Anthropic account."
 echo "Your credentials will be saved to:"
 echo "  $HOST_CONFIG"
 echo "  $HOST_SESSION"
+echo "  $HOST_CREDS"
 echo ""
 
 case "${SLAWDCODE_DEBUG:-}" in
@@ -53,6 +64,7 @@ case "${SLAWDCODE_DEBUG:-}" in
             echo "Image:        $IMAGE"
             echo "HostConfig:   $HOST_CONFIG"
             echo "HostSession:  $HOST_SESSION"
+            echo "HostCreds:    $HOST_CREDS"
             echo "-----------------------"
         } >&2
         ;;
@@ -64,6 +76,7 @@ exec "$RUNTIME" run \
     --tty \
     --volume "${HOST_CONFIG}:/home/claude/.claude:z" \
     --volume "${HOST_SESSION}:/home/claude/.claude.json:z" \
+    --volume "${HOST_CREDS}:/home/claude/.claude/.credentials.json:z" \
     --security-opt no-new-privileges \
     --cap-drop ALL \
     ${SLAWDCODE_EXTRA_ARGS:-} \
