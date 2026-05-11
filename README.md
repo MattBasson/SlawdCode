@@ -102,13 +102,14 @@ Your shell
                       └─ api.anthropic.com
 ```
 
-**By default, three host paths are mounted into the container:**
+**By default, four host paths are mounted into the container:**
 
 | Host path | Container path | Purpose |
 |---|---|---|
 | `$PWD` (current dir) | `/workspace` | Your project files |
 | `~/.claude` | `/home/claude/.claude` | Project history, MCP server config |
-| `~/.claude.json` | `/home/claude/.claude.json` | Claude Code session + OAuth login state |
+| `~/.claude.json` | `/home/claude/.claude.json` | Claude Code session metadata |
+| `~/.claude/.credentials.json` | `/home/claude/.claude/.credentials.json` | OAuth access / refresh tokens (mounted as a single file on top of the directory mount so it persists reliably on Windows-backed bind mounts) |
 
 When `SLAWDCODE_PERSIST_CLOUD_CREDS=1`, three additional **opt-in** mounts are added so the bundled cloud CLIs keep their auth state across runs:
 
@@ -323,10 +324,10 @@ Claude Code parses `~/.claude.json` on startup and refuses to run if it isn't va
 
 ### Claude keeps prompting `/login` after a fresh build
 
-Claude Code stores its OAuth/login state in `~/.claude.json` on the host. If `slawdcode-auth` writes the token but the next `claude` invocation still asks you to `/login`, one of these is usually wrong:
+Claude Code stores its OAuth access/refresh tokens in `~/.claude/.credentials.json` and broader session metadata in `~/.claude.json`. If `slawdcode-auth` writes the token but the next `claude` invocation still asks you to `/login` (especially with a "Welcome back" banner alongside the "Not logged in" status), one of these is usually wrong:
 
-1. The image is stale and predates the wrapper's `~/.claude.json` mount — `make clean && make build` (or `.\scripts\make.ps1 clean ; .\scripts\make.ps1 build`) and re-run `slawdcode-auth`.
-2. `~/.claude.json` exists on the host as an empty *directory* (the runtime created it on a previous run when the file was missing) — delete it (`rm -rf ~/.claude.json`) and re-run `slawdcode-auth`; the wrapper will recreate it as a file with mode 600.
+1. The image is stale and predates the wrapper's bind mounts — `make clean && make build` (or `.\scripts\make.ps1 clean ; .\scripts\make.ps1 build`) and re-run `slawdcode-auth`.
+2. Either `~/.claude.json` or `~/.claude/.credentials.json` exists on the host as an empty *directory* (the runtime created it on a previous run when the file was missing) — delete both (`rm -rf ~/.claude.json ~/.claude/.credentials.json`) and re-run `slawdcode-auth`; the wrappers recreate each as a 600-perm file initialized with `{}`.
 3. **(Windows / Podman Desktop)** Your host path didn't translate correctly into the container's bind mount. Run with `SLAWDCODE_DEBUG=1` to see the resolved paths and the exact `podman run` command:
 
    ```powershell

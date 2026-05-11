@@ -22,13 +22,16 @@ if [ -z "$RUNTIME" ]; then
 fi
 
 # --- Volume mounts ---
-# $PWD            → /workspace                   (your project — explicitly mounted, nothing else)
-# ~/.claude       → /home/claude/.claude         (project history, MCP config, etc.)
-# ~/.claude.json  → /home/claude/.claude.json    (Claude Code session + login state)
+# $PWD                       → /workspace                              (your project)
+# ~/.claude                  → /home/claude/.claude                    (project history, MCP config, etc.)
+# ~/.claude.json             → /home/claude/.claude.json               (session metadata)
+# ~/.claude/.credentials.json→ /home/claude/.claude/.credentials.json  (OAuth tokens — see below)
 HOST_CWD="$(pwd)"
 HOST_CONFIG="${HOME}/.claude"
 HOST_SESSION="${HOME}/.claude.json"
+HOST_CREDS="${HOST_CONFIG}/.credentials.json"
 mkdir -p "$HOST_CONFIG"
+
 # Bind-mounting a single file requires the source to exist; create it on
 # first run (or when the host file is empty / corrupt) so the OAuth tokens
 # that 'claude auth login' writes here are persisted back to the host
@@ -42,10 +45,25 @@ if [ ! -s "$HOST_SESSION" ]; then
     (umask 077 && printf '{}\n' > "$HOST_SESSION")
 fi
 
+# Separately bind-mount ~/.claude/.credentials.json — this is where Claude
+# Code stores the OAuth access/refresh tokens. On Podman-Desktop /
+# Docker-Desktop on Windows, brand-new files created at the root of a
+# directory bind mount over the WSL2→9p→NTFS path do not reliably reach
+# the host (existing files update fine, files in subdirs work fine, but a
+# new mode-0600 file at the mount root is silently dropped). Pre-creating
+# the host file and bind-mounting it directly forces it through the
+# single-file mount code path, the same one that already works for
+# ~/.claude.json.
+if [ ! -s "$HOST_CREDS" ]; then
+    (umask 077 && printf '{}\n' > "$HOST_CREDS")
+fi
+chmod 600 "$HOST_CREDS" 2>/dev/null || true
+
 VOLUME_ARGS=(
     --volume "${HOST_CWD}:/workspace:z"
     --volume "${HOST_CONFIG}:/home/claude/.claude:z"
     --volume "${HOST_SESSION}:/home/claude/.claude.json:z"
+    --volume "${HOST_CREDS}:/home/claude/.claude/.credentials.json:z"
 )
 
 # --- Optional: cloud CLI credential persistence ---
@@ -90,6 +108,10 @@ case "${SLAWDCODE_DEBUG:-}" in
             echo "HostSession:  $HOST_SESSION"
             if [ -f "$HOST_SESSION" ]; then
                 echo "HostSession size: $(wc -c < "$HOST_SESSION") bytes, modified: $(date -r "$HOST_SESSION" 2>/dev/null || stat -f '%Sm' "$HOST_SESSION" 2>/dev/null)"
+            fi
+            echo "HostCreds:    $HOST_CREDS"
+            if [ -f "$HOST_CREDS" ]; then
+                echo "HostCreds size:   $(wc -c < "$HOST_CREDS") bytes, modified: $(date -r "$HOST_CREDS" 2>/dev/null || stat -f '%Sm' "$HOST_CREDS" 2>/dev/null)"
             fi
             echo "Command:"
             echo "  $RUNTIME run --rm --interactive --tty ${ENV_ARGS[*]} ${VOLUME_ARGS[*]} --workdir /workspace --security-opt no-new-privileges --cap-drop ALL ${SLAWDCODE_EXTRA_ARGS:-} $IMAGE $*"
