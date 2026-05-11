@@ -28,8 +28,13 @@ mkdir -p "$HOST_CONFIG"
 # Code releases store the OAuth login state in ~/.claude.json (not inside
 # the ~/.claude/ directory), so without this file mount the token is
 # written to a path inside the --rm container and lost on exit.
-if [ ! -e "$HOST_SESSION" ]; then
-    (umask 077 && : > "$HOST_SESSION")
+# Initialize with '{}' (valid empty-object JSON) rather than a zero-byte
+# file: Claude Code parses ~/.claude.json on startup and refuses to run if
+# the file isn't valid JSON, so a 0-byte placeholder triggers a
+# "Configuration Error / Unexpected EOF" prompt before the auth flow
+# can begin.
+if [ ! -s "$HOST_SESSION" ]; then
+    (umask 077 && printf '{}\n' > "$HOST_SESSION")
 fi
 
 echo "SlawdCode — Claude Code Authentication"
