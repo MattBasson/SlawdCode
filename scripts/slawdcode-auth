@@ -89,16 +89,23 @@ case "${SLAWDCODE_DEBUG:-}" in
 esac
 
 # Run auth in a named, non-rm container.
-# The ~/.claude/ directory and ~/.claude.json are still bind-mounted so
-# in-progress changes Claude Code makes during the auth flow (history,
-# settings, the session payload in ~/.claude.json itself) persist
-# directly — only the credentials file needs the cp workaround.
+#
+# We intentionally do NOT bind-mount ~/.claude/ here. When the directory
+# is bind-mounted, Claude Code's atomic-rename write of .credentials.json
+# fails silently across the WSL2 → 9p → NTFS boundary on Podman/Docker
+# Desktop, and 'podman cp' then reads through the same bind mount (back
+# to the empty host source) and reports the file as missing — exactly
+# the error this script saw on previous iterations. Running with no
+# .claude/ mount lets Claude Code write to the container's own
+# filesystem, where 'podman cp' below can actually extract it.
+#
+# ~/.claude.json is still bind-mounted because the single-file mount is
+# reliable for that file (verified across earlier iterations).
 auth_status=0
 "$RUNTIME" run \
     --interactive \
     --tty \
     --name "$AUTH_CONTAINER" \
-    --volume "${HOST_CONFIG}:/home/claude/.claude:z" \
     --volume "${HOST_SESSION}:/home/claude/.claude.json:z" \
     --security-opt no-new-privileges \
     --cap-drop ALL \

@@ -88,11 +88,20 @@ Write-Host ''
 
 $AuthContainer = "slawdcode-auth-{0}-{1}" -f $PID, [int][DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
 
+# Intentionally NOT bind-mounting ~/.claude/ here. When that directory
+# is bind-mounted, Claude Code's atomic-rename write of .credentials.json
+# fails silently across the WSL2 → 9p → NTFS boundary on Podman/Docker
+# Desktop, and 'podman cp' subsequently reads through the same bind
+# mount (back to the empty host source) and reports the file as
+# missing — exactly what was observed in the previous iteration. Running
+# without the .claude/ mount lets Claude Code write to the container's
+# own filesystem, where 'podman cp' below can actually extract it.
+# ~/.claude.json is still bind-mounted because the single-file mount is
+# reliable for that file.
 $RunArgs = @(
     'run',
     '--interactive', '--tty',
     '--name', $AuthContainer,
-    '--volume', "${HostConfigUnix}:/home/claude/.claude:z",
     '--volume', "${HostSessionUnix}:/home/claude/.claude.json:z",
     '--security-opt', 'no-new-privileges',
     '--cap-drop', 'ALL'
