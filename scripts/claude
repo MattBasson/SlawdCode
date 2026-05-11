@@ -29,11 +29,17 @@ HOST_CWD="$(pwd)"
 HOST_CONFIG="${HOME}/.claude"
 HOST_SESSION="${HOME}/.claude.json"
 mkdir -p "$HOST_CONFIG"
-# Bind-mounting a single file requires the source to exist; touch it on first
-# run so the OAuth tokens that 'claude auth login' writes here are persisted
-# back to the host instead of being lost when the --rm container exits.
-if [ ! -e "$HOST_SESSION" ]; then
-    (umask 077 && : > "$HOST_SESSION")
+# Bind-mounting a single file requires the source to exist; create it on
+# first run (or when the host file is empty / corrupt) so the OAuth tokens
+# that 'claude auth login' writes here are persisted back to the host
+# instead of being lost when the --rm container exits.
+#
+# Initialize with '{}' rather than a zero-byte file: current Claude Code
+# parses ~/.claude.json on startup and refuses to run if it isn't valid
+# JSON, so a 0-byte placeholder triggers a "Configuration Error /
+# Unexpected EOF" prompt before the auth flow can even begin.
+if [ ! -s "$HOST_SESSION" ]; then
+    (umask 077 && printf '{}\n' > "$HOST_SESSION")
 fi
 
 VOLUME_ARGS=(

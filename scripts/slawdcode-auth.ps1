@@ -48,13 +48,16 @@ $HostConfig = Join-Path $UserHomeDir '.claude'
 if (-not (Test-Path $HostConfig)) {
     New-Item -ItemType Directory -Path $HostConfig | Out-Null
 }
-# Bind-mounting a single file requires the source to exist. Recent Claude
-# Code releases store the OAuth login state in ~/.claude.json, so without
-# this file mount the token is written inside the --rm container and lost
-# when the session ends.
+# Initialize with '{}' (valid empty-object JSON) rather than a zero-byte
+# file: Claude Code parses ~/.claude.json on startup and refuses to run
+# if it isn't valid JSON, so a 0-byte placeholder triggers a
+# "Configuration Error / Unexpected EOF" prompt before the auth flow
+# can begin.
 $HostSession = Join-Path $UserHomeDir '.claude.json'
-if (-not (Test-Path $HostSession)) {
-    New-Item -ItemType File -Path $HostSession | Out-Null
+if (-not (Test-Path $HostSession) -or (Get-Item $HostSession).Length -eq 0) {
+    # WriteAllText (no BOM) avoids UTF-8 BOM issues some Claude Code
+    # versions hit when parsing JSON.
+    [System.IO.File]::WriteAllText($HostSession, '{}')
 }
 
 # Convert Windows paths to a Podman/Docker-friendly form: forward slashes

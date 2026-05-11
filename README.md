@@ -314,6 +314,13 @@ The `slawdcode-auth` and `claude` wrapper scripts auto-create `~/.claude.json` i
 
 ## Troubleshooting
 
+### Claude shows `Configuration Error / JSON Parse error: Unexpected EOF`
+
+Claude Code parses `~/.claude.json` on startup and refuses to run if it isn't valid JSON. Older versions of the SlawdCode wrappers pre-created the file as a zero-byte placeholder for the bind mount; current Claude Code rejects that. Fix:
+
+1. Update the wrappers (`git pull` + `make install` / `.\scripts\make.ps1 install`) — the wrappers now initialize the file with `{}`.
+2. For an already-broken file, either choose **"2. Reset with default configuration"** in the in-container prompt, or run on the host: `Remove-Item $HOME\.claude.json` (PowerShell) / `rm ~/.claude.json` (bash) and re-run `slawdcode-auth`.
+
 ### Claude keeps prompting `/login` after a fresh build
 
 Claude Code stores its OAuth/login state in `~/.claude.json` on the host. If `slawdcode-auth` writes the token but the next `claude` invocation still asks you to `/login`, one of these is usually wrong:
