@@ -3,8 +3,7 @@
 # Linux / macOS / WSL2
 #
 # Run this once. A browser window will open — sign in with your Anthropic account.
-# OAuth tokens are saved to ~/.claude/ on the HOST machine (never inside the container).
-# After this, you can run 'claude' without any API key.
+# OAuth tokens are saved to ~/.claude/ and ~/.claude.json on the HOST.
 set -euo pipefail
 
 IMAGE="${SLAWDCODE_IMAGE:-slawdcode:latest}"
@@ -26,22 +25,14 @@ HOST_SESSION="${HOME}/.claude.json"
 HOST_CREDS="${HOST_CONFIG}/.credentials.json"
 mkdir -p "$HOST_CONFIG"
 
-# Bind-mounting a single file requires the source to exist. Initialize
-# ~/.claude.json with '{}' (valid empty-object JSON) rather than a
-# zero-byte file: Claude Code parses it on startup and refuses to run on
-# invalid JSON, so a 0-byte placeholder triggers a "Configuration Error /
-# Unexpected EOF" prompt before the auth flow can begin.
+# Initialize ~/.claude.json with '{}' (valid empty-object JSON) — Claude
+# Code parses it on startup and refuses to run on invalid JSON.
 if [ ! -s "$HOST_SESSION" ]; then
     (umask 077 && printf '{}\n' > "$HOST_SESSION")
 fi
-
-# Separately bind-mount ~/.claude/.credentials.json (where Claude Code
-# writes its OAuth access/refresh tokens). On Podman-Desktop /
-# Docker-Desktop on Windows, brand-new files created at the root of a
-# directory bind mount over the WSL2→9p→NTFS path don't reliably reach
-# the host — pre-creating the host file and binding it directly forces
-# the persisted-path code path, the same one that already works for
-# ~/.claude.json.
+# Initialize ~/.claude/.credentials.json similarly. We do NOT bind-mount
+# this file (see below); it just needs to exist so subsequent 'claude'
+# runs that DO bind-mount it have a real file source.
 if [ ! -s "$HOST_CREDS" ]; then
     (umask 077 && printf '{}\n' > "$HOST_CREDS")
 fi
@@ -56,29 +47,89 @@ echo "  $HOST_SESSION"
 echo "  $HOST_CREDS"
 echo ""
 
+# --- Why this script avoids --rm + a bind mount for .credentials.json ---
+#
+# Claude Code writes its OAuth access/refresh tokens to
+# /home/claude/.claude/.credentials.json (mode 0600). On Podman-Desktop /
+# Docker-Desktop on Windows, this write does not reach the host through
+# either a directory bind mount (file is silently dropped when created at
+# the root of the mount) or a single-file bind mount (the atomic-rename
+# pattern Claude Code uses fails across the WSL2 → 9p → NTFS boundary,
+# so the rename never lands).
+#
+# Both failure modes are silent — "Login successful" prints, but the
+# host-side file stays at the 2-byte '{}' placeholder.
+#
+# We work around this by running 'claude auth login' in a NAMED (not
+# --rm) container, then extracting the credentials file with the
+# runtime's own 'cp' subcommand. 'podman cp' / 'docker cp' goes through
+# a different file-extraction path than bind mounts and does land bytes
+# on the host. The container is then removed.
+AUTH_CONTAINER="slawdcode-auth-$$-$(date +%s 2>/dev/null || echo $RANDOM)"
+
+cleanup() {
+    "$RUNTIME" rm -f "$AUTH_CONTAINER" >/dev/null 2>&1 || true
+}
+trap cleanup EXIT INT TERM
+
 case "${SLAWDCODE_DEBUG:-}" in
     1|true|TRUE|yes|YES)
         {
             echo "--- SlawdCode debug ---"
-            echo "Runtime:      $RUNTIME"
-            echo "Image:        $IMAGE"
-            echo "HostConfig:   $HOST_CONFIG"
-            echo "HostSession:  $HOST_SESSION"
-            echo "HostCreds:    $HOST_CREDS"
+            echo "Runtime:        $RUNTIME"
+            echo "Image:          $IMAGE"
+            echo "AuthContainer:  $AUTH_CONTAINER"
+            echo "HostConfig:     $HOST_CONFIG"
+            echo "HostSession:    $HOST_SESSION"
+            echo "HostCreds:      $HOST_CREDS"
+            echo "Strategy:       run named container + '$RUNTIME cp' the creds file out after auth"
             echo "-----------------------"
         } >&2
         ;;
 esac
 
-exec "$RUNTIME" run \
-    --rm \
+# Run auth in a named, non-rm container.
+# The ~/.claude/ directory and ~/.claude.json are still bind-mounted so
+# in-progress changes Claude Code makes during the auth flow (history,
+# settings, the session payload in ~/.claude.json itself) persist
+# directly — only the credentials file needs the cp workaround.
+auth_status=0
+"$RUNTIME" run \
     --interactive \
     --tty \
+    --name "$AUTH_CONTAINER" \
     --volume "${HOST_CONFIG}:/home/claude/.claude:z" \
     --volume "${HOST_SESSION}:/home/claude/.claude.json:z" \
-    --volume "${HOST_CREDS}:/home/claude/.claude/.credentials.json:z" \
     --security-opt no-new-privileges \
     --cap-drop ALL \
     ${SLAWDCODE_EXTRA_ARGS:-} \
     "$IMAGE" \
-    auth login
+    auth login || auth_status=$?
+
+# Extract the credentials file from the now-stopped container. Use the
+# runtime's cp, which writes via the runtime's file-extraction path
+# (bypasses the WSL2/9p/NTFS bind-mount issue). On macOS / Linux this
+# also works fine and is equivalent.
+extract_status=0
+"$RUNTIME" cp \
+    "${AUTH_CONTAINER}:/home/claude/.claude/.credentials.json" \
+    "$HOST_CREDS" 2>/dev/null || extract_status=$?
+
+if [ "$extract_status" -ne 0 ]; then
+    echo "" >&2
+    echo "Warning: could not copy .credentials.json out of the auth container." >&2
+    echo "         The OAuth login probably did not complete. Re-run slawdcode-auth." >&2
+fi
+chmod 600 "$HOST_CREDS" 2>/dev/null || true
+
+# Some auth flows also rewrite ~/.claude.json. The bind mount already
+# captured that, but re-extract as a belt-and-suspenders fallback if the
+# bind mount swallowed the write too.
+host_session_size=$(wc -c < "$HOST_SESSION" 2>/dev/null || echo 0)
+if [ "$host_session_size" -le 3 ]; then
+    "$RUNTIME" cp \
+        "${AUTH_CONTAINER}:/home/claude/.claude.json" \
+        "$HOST_SESSION" 2>/dev/null || true
+fi
+
+exit "$auth_status"
