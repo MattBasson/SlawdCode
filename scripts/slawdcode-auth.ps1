@@ -126,6 +126,16 @@ $RunArgs = @(
 )
 
 if ($env:SLAWDCODE_EXTRA_ARGS) {
+    # M3: reject flags that would undo container hardening.
+    $deniedPattern = '--privileged|--cap-add|--user[\s=]+0|--user[\s=]+root|--network[\s=]+host|--pid[\s=]+host|--ipc[\s=]+host|--userns[\s=]+host|--security-opt[\s=]+seccomp=unconfined|--security-opt[\s=]+apparmor=unconfined|--security-opt[\s=]+label=disable'
+    if ($env:SLAWDCODE_EXTRA_ARGS -imatch $deniedPattern) {
+        if ($env:SLAWDCODE_ALLOW_UNSAFE_EXTRA_ARGS -eq '1') {
+            Write-Warning 'SLAWDCODE_ALLOW_UNSAFE_EXTRA_ARGS=1 — security-hardening bypass active.'
+        } else {
+            Write-Error 'SLAWDCODE_EXTRA_ARGS contains a flag that undoes container hardening. Set SLAWDCODE_ALLOW_UNSAFE_EXTRA_ARGS=1 to override.'
+            exit 1
+        }
+    }
     $tokens = [System.Management.Automation.PSParser]::Tokenize(
         $env:SLAWDCODE_EXTRA_ARGS, [ref]$null
     ) | Where-Object {

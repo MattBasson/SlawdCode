@@ -244,6 +244,21 @@ $env:SLAWDCODE_EXTRA_ARGS = "--env HTTPS_PROXY=http://proxy.corp.example.com:808
 claude --help
 ```
 
+`SLAWDCODE_EXTRA_ARGS` is validated against a deny-list of flags that would undo the wrapper's hardening (`--privileged`, `--cap-add`, `--user 0`, `--network=host`, etc.). Blocked args cause an immediate exit. Set `SLAWDCODE_ALLOW_UNSAFE_EXTRA_ARGS=1` to bypass (at your own risk).
+
+### Restricting network egress
+
+The container has **unrestricted outbound network access** by default — Claude Code needs `api.anthropic.com`, but the bundled CLIs (`gh`, `aws`, `az`) also need to reach their respective APIs.
+
+To restrict egress, use `SLAWDCODE_EXTRA_ARGS` to route through a corporate proxy:
+
+```bash
+export SLAWDCODE_EXTRA_ARGS="--env HTTPS_PROXY=http://proxy.corp.example.com:8080 --env NO_PROXY=localhost,169.254.169.254"
+claude
+```
+
+Or create a restricted Podman network and pass `--network <name>` via `SLAWDCODE_EXTRA_ARGS`.
+
 ---
 
 ## Security Model
@@ -257,7 +272,7 @@ claude --help
 | API key on disk | OAuth preferred — tokens in `~/.claude/` and `~/.claude.json` on host, never in image |
 | API key in environment | Optional fallback only; OAuth avoids env vars entirely |
 | Image supply chain | Node.js Debian Bookworm-slim base + standard tooling (`bash`, `git`, `curl`, `gnupg`, `jq`, `less`, `tar`, `unzip`, `openssh-client`, `ripgrep`, `ca-certificates`) + cloud CLIs (`gh`, `az`, AWS CLI v2) installed from their official upstream repositories + npm install from official registry at build time |
-| Network | Container has outbound access to api.anthropic.com (required by Claude Code) |
+| Network | Unrestricted outbound egress by default — see "Restricting network egress" below |
 
 ---
 

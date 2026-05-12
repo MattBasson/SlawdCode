@@ -52,10 +52,27 @@ RUN set -eux; \
     rm -rf /var/lib/apt/lists/*
 
 # AWS CLI v2 — installed from the official self-contained zip distribution.
+# Optionally pin a version and verify its SHA-256 checksum at build time:
+#   make build AWSCLI_VERSION=2.17.0 \
+#              AWSCLI_SHA256_X86_64=<hex> \
+#              AWSCLI_SHA256_AARCH64=<hex>
 # https://docs.aws.amazon.com/cli/latest/userguide/getting-started-install.html
+ARG AWSCLI_VERSION=
+ARG AWSCLI_SHA256_X86_64=
+ARG AWSCLI_SHA256_AARCH64=
 RUN set -eux; \
     arch="$(uname -m)"; \
-    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-${arch}.zip" -o /tmp/awscliv2.zip; \
+    if [ -n "${AWSCLI_VERSION}" ]; then \
+        url="https://awscli.amazonaws.com/awscli-exe-linux-${arch}-${AWSCLI_VERSION}.zip"; \
+    else \
+        url="https://awscli.amazonaws.com/awscli-exe-linux-${arch}.zip"; \
+    fi; \
+    curl -fsSL "$url" -o /tmp/awscliv2.zip; \
+    if [ "$arch" = "x86_64" ] && [ -n "${AWSCLI_SHA256_X86_64}" ]; then \
+        echo "${AWSCLI_SHA256_X86_64}  /tmp/awscliv2.zip" | sha256sum -c -; \
+    elif [ "$arch" = "aarch64" ] && [ -n "${AWSCLI_SHA256_AARCH64}" ]; then \
+        echo "${AWSCLI_SHA256_AARCH64}  /tmp/awscliv2.zip" | sha256sum -c -; \
+    fi; \
     unzip -q /tmp/awscliv2.zip -d /tmp; \
     /tmp/aws/install; \
     rm -rf /tmp/awscliv2.zip /tmp/aws

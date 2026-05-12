@@ -24,7 +24,29 @@ fi
 HOST_CONFIG="${HOME}/.claude"
 HOST_SESSION="${HOME}/.claude.json"
 HOST_CREDS="${HOST_CONFIG}/.credentials.json"
+
+# M5: refuse to operate if any credential path is a symlink.
+for _path in "$HOST_CONFIG" "$HOST_SESSION" "$HOST_CREDS"; do
+    if [ -L "$_path" ]; then
+        echo "Error: symlink detected at $_path — refusing to operate." >&2
+        echo "  Remove the symlink; SlawdCode will recreate it as a regular file/directory." >&2
+        exit 1
+    fi
+done
+
 mkdir -p "$HOST_CONFIG"
+
+# M3: reject EXTRA_ARGS that would undo container hardening.
+_EXTRA_ARGS_DENIED='--privileged|--cap-add|--user[[:space:]=]+0|--user[[:space:]=]+root|--network[[:space:]=]+host|--pid[[:space:]=]+host|--ipc[[:space:]=]+host|--userns[[:space:]=]+host|--security-opt[[:space:]=]+seccomp=unconfined|--security-opt[[:space:]=]+apparmor=unconfined|--security-opt[[:space:]=]+label=disable'
+if printf '%s' "${SLAWDCODE_EXTRA_ARGS:-}" | grep -qiE "${_EXTRA_ARGS_DENIED}"; then
+    if [ "${SLAWDCODE_ALLOW_UNSAFE_EXTRA_ARGS:-}" = "1" ]; then
+        echo "Warning: SLAWDCODE_ALLOW_UNSAFE_EXTRA_ARGS=1 — security-hardening bypass active." >&2
+    else
+        echo "Error: SLAWDCODE_EXTRA_ARGS contains a flag that undoes container hardening." >&2
+        echo "  Set SLAWDCODE_ALLOW_UNSAFE_EXTRA_ARGS=1 to override (at your own risk)." >&2
+        exit 1
+    fi
+fi
 
 # --- Pre-auth: remove stale auth containers from previous failed runs ---
 #
