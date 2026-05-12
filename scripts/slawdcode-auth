@@ -2,8 +2,9 @@
 # SlawdCode — one-time OAuth authentication setup
 # Linux / macOS / WSL2
 #
-# Run this once. A browser window will open — sign in with your Anthropic account.
-# OAuth tokens are saved to ~/.claude/ and ~/.claude.json on the HOST.
+# Run this once (or any time you need to re-authenticate). A browser window
+# will open — sign in with your Anthropic account. OAuth tokens are saved to
+# ~/.claude/ and ~/.claude.json on the HOST.
 set -euo pipefail
 
 IMAGE="${SLAWDCODE_IMAGE:-slawdcode:latest}"
@@ -25,18 +26,39 @@ HOST_SESSION="${HOME}/.claude.json"
 HOST_CREDS="${HOST_CONFIG}/.credentials.json"
 mkdir -p "$HOST_CONFIG"
 
-# Initialize ~/.claude.json with '{}' (valid empty-object JSON) — Claude
-# Code parses it on startup and refuses to run on invalid JSON.
-if [ ! -s "$HOST_SESSION" ]; then
-    (umask 077 && printf '{}\n' > "$HOST_SESSION")
+# --- Pre-auth: remove stale auth containers from previous failed runs ---
+#
+# When credential extraction fails, slawdcode-auth intentionally leaves the
+# named container behind so the user can run 'podman cp' manually. On
+# Windows / Podman Desktop these stopped containers can hold Podman's WSL2
+# bridge in a degraded state that causes subsequent auth runs to also fail.
+# Removing them here resets that state before every new attempt, eliminating
+# the need to run 'make clean' just to get a working re-auth.
+stale=$("$RUNTIME" ps -aq --filter "name=slawdcode-auth-" 2>/dev/null || true)
+if [ -n "$stale" ]; then
+    echo "Removing stale auth containers..." >&2
+    # shellcheck disable=SC2086
+    "$RUNTIME" rm -f $stale >/dev/null 2>&1 || true
 fi
-# Initialize ~/.claude/.credentials.json similarly. We do NOT bind-mount
-# this file (see below); it just needs to exist so subsequent 'claude'
-# runs that DO bind-mount it have a real file source.
-if [ ! -s "$HOST_CREDS" ]; then
-    (umask 077 && printf '{}\n' > "$HOST_CREDS")
-fi
-chmod 600 "$HOST_CREDS" 2>/dev/null || true
+
+# Reset both credential files to clean '{}' placeholders before every auth run.
+#
+# This serves two purposes:
+#
+#  1. It clears any stale / expired session state so that the regular 'claude'
+#     wrapper always has valid JSON files to bind-mount, even when auth fails.
+#     The files are overwritten by 'podman cp' once auth succeeds.
+#
+#  2. It prevents stale data from influencing behaviour: previously the host
+#     ~/.claude.json (containing an existing session reference) was
+#     bind-mounted into the auth container. Claude Code would detect the
+#     "existing session" and sometimes skip the OAuth browser redirect
+#     entirely, leaving credentials empty. By resetting the file here and
+#     NOT mounting it (see below), every auth run is a guaranteed clean-slate
+#     OAuth flow.
+(umask 077 && printf '{}\n' > "$HOST_SESSION")
+(umask 077 && printf '{}\n' > "$HOST_CREDS")
+chmod 600 "$HOST_CREDS"
 
 echo "SlawdCode — Claude Code Authentication"
 echo "======================================="
@@ -47,24 +69,24 @@ echo "  $HOST_SESSION"
 echo "  $HOST_CREDS"
 echo ""
 
-# --- Why this script avoids --rm + a bind mount for .credentials.json ---
+# --- Why this script runs the auth container with NO volume mounts ---
 #
-# Claude Code writes its OAuth access/refresh tokens to
-# /home/claude/.claude/.credentials.json (mode 0600). On Podman-Desktop /
-# Docker-Desktop on Windows, this write does not reach the host through
-# either a directory bind mount (file is silently dropped when created at
-# the root of the mount) or a single-file bind mount (the atomic-rename
-# pattern Claude Code uses fails across the WSL2 → 9p → NTFS boundary,
-# so the rename never lands).
+# The auth container is intentionally started with no bind mounts so that:
 #
-# Both failure modes are silent — "Login successful" prints, but the
-# host-side file stays at the 2-byte '{}' placeholder.
+#  a) Claude Code writes its OAuth tokens and session metadata entirely to
+#     the container's own overlay filesystem (ext4 inside the WSL2 VM on
+#     Windows). There is no WSL2 → 9p → NTFS boundary for the
+#     atomic-rename write to fail across.
 #
-# We work around this by running 'claude auth login' in a NAMED (not
-# --rm) container, then extracting the credentials file with the
-# runtime's own 'cp' subcommand. 'podman cp' / 'docker cp' goes through
-# a different file-extraction path than bind mounts and does land bytes
-# on the host. The container is then removed.
+#  b) 'podman cp' reads from that same overlay, not through a bind mount.
+#     When ~/.claude.json was bind-mounted, 'podman cp' would read through
+#     the mount back to the host file, returning the stale placeholder
+#     instead of the freshly-written session file.
+#
+#  c) Every re-auth is a guaranteed clean-slate OAuth flow. A stale or
+#     expired ~/.claude.json on the host can cause Claude Code to detect
+#     an "existing session" and skip the browser redirect, leaving the
+#     credentials file empty. With no mounts, that can't happen.
 AUTH_CONTAINER="slawdcode-auth-$$-$(date +%s 2>/dev/null || echo $RANDOM)"
 
 cleanup() {
@@ -82,40 +104,26 @@ case "${SLAWDCODE_DEBUG:-}" in
             echo "HostConfig:     $HOST_CONFIG"
             echo "HostSession:    $HOST_SESSION"
             echo "HostCreds:      $HOST_CREDS"
-            echo "Strategy:       run named container + '$RUNTIME cp' the creds file out after auth"
+            echo "Strategy:       no mounts; named container + '$RUNTIME cp' both files after auth"
             echo "-----------------------"
         } >&2
         ;;
 esac
 
-# Run auth in a named, non-rm container.
-#
-# We intentionally do NOT bind-mount ~/.claude/ here. When the directory
-# is bind-mounted, Claude Code's atomic-rename write of .credentials.json
-# fails silently across the WSL2 → 9p → NTFS boundary on Podman/Docker
-# Desktop, and 'podman cp' then reads through the same bind mount (back
-# to the empty host source) and reports the file as missing — exactly
-# the error this script saw on previous iterations. Running with no
-# .claude/ mount lets Claude Code write to the container's own
-# filesystem, where 'podman cp' below can actually extract it.
-#
-# ~/.claude.json is still bind-mounted because the single-file mount is
-# reliable for that file (verified across earlier iterations).
+# Run auth in a named, non-rm container with NO volume mounts (see above).
 auth_status=0
 "$RUNTIME" run \
     --interactive \
     --tty \
     --name "$AUTH_CONTAINER" \
-    --volume "${HOST_SESSION}:/home/claude/.claude.json:z" \
     --security-opt no-new-privileges \
     --cap-drop ALL \
     ${SLAWDCODE_EXTRA_ARGS:-} \
     "$IMAGE" \
     auth login || auth_status=$?
 
-# Extract the credentials file from the now-stopped container. Capture
-# both stdout and stderr so failures (especially on Podman Desktop /
-# Windows where 'podman cp' can behave unexpectedly) are visible.
+# Extract credentials from the now-stopped container. Capture stderr so any
+# failure is visible and diagnosable.
 extract_status=0
 cp_output=$("$RUNTIME" cp \
     "${AUTH_CONTAINER}:/home/claude/.claude/.credentials.json" \
@@ -128,15 +136,13 @@ if [ "$extract_status" -ne 0 ] || [ ! -s "$HOST_CREDS" ] || [ "$(wc -c < "$HOST_
         echo "         Last output: $cp_output" >&2
     fi
     echo "         Recovery options:" >&2
-    echo "           1. Re-run slawdcode-auth (transient errors usually clear)." >&2
+    echo "           1. Re-run slawdcode-auth — stale containers are pre-cleaned automatically." >&2
     echo "           2. Manually extract:" >&2
     echo "                $RUNTIME cp '${AUTH_CONTAINER}:/home/claude/.claude/.credentials.json' '$HOST_CREDS'" >&2
     echo "              (the named container is left in place when extraction fails)." >&2
     echo "           3. Bypass OAuth entirely by setting ANTHROPIC_API_KEY before running 'claude'." >&2
     echo "              See the README 'Authentication / Fallback: API key' section." >&2
 
-    # Restore the placeholder so the regular 'claude' wrapper has a
-    # file source for its bind mount.
     if [ ! -s "$HOST_CREDS" ]; then
         (umask 077 && printf '{}\n' > "$HOST_CREDS")
     fi
@@ -147,16 +153,16 @@ else
 fi
 chmod 600 "$HOST_CREDS" 2>/dev/null || true
 
-# Belt-and-suspenders fallback for ~/.claude.json
-host_session_size=$(wc -c < "$HOST_SESSION" 2>/dev/null || echo 0)
-if [ "$host_session_size" -le 3 ]; then
-    "$RUNTIME" cp \
-        "${AUTH_CONTAINER}:/home/claude/.claude.json" \
-        "$HOST_SESSION" 2>/dev/null || true
-fi
+# Extract ~/.claude.json — since we no longer bind-mount it, Claude Code
+# creates a fresh version in the container overlay. We must always cp it
+# out; otherwise the host file stays at the '{}' placeholder and the
+# regular 'claude' wrapper starts each session without user/org identity.
+"$RUNTIME" cp \
+    "${AUTH_CONTAINER}:/home/claude/.claude.json" \
+    "$HOST_SESSION" 2>/dev/null || true
 
-# Leave the named container in place when extraction failed so the user
-# can recover by running 'podman cp' themselves; remove it on success.
+# Leave the named container in place only when extraction failed — the user
+# can then recover by running 'podman cp' manually.
 if [ "${extraction_failed:-0}" -eq 0 ]; then
     trap - EXIT
     cleanup

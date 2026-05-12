@@ -63,6 +63,16 @@ switch ($Target.ToLowerInvariant()) {
     }
     'clean' {
         $Runtime = Resolve-Runtime
+        # Remove stale auth containers left behind by previous failed runs
+        # before removing the image, so the WSL2 bridge state is reset cleanly.
+        try {
+            $staleIds = @(& $Runtime ps -aq --filter 'name=slawdcode-auth-' 2>$null |
+                            Where-Object { $_ -ne '' })
+            if ($staleIds.Count -gt 0) {
+                Write-Host 'Removing stale auth containers...'
+                & $Runtime rm -f @staleIds 2>$null | Out-Null
+            }
+        } catch { }
         & $Runtime rmi $Image 2>$null
         exit 0
     }
