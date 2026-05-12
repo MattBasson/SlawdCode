@@ -19,5 +19,6 @@ install: ## Install the 'claude' and 'slawdcode-auth' commands to ~/.local/bin
 run: ## Open an interactive Claude Code session in the current directory
 	./scripts/claude
 
-clean: ## Remove the local container image
+clean: ## Remove stale auth containers and the local container image
+	-$(RUNTIME) ps -aq --filter "name=slawdcode-auth-" | xargs -r $(RUNTIME) rm -f 2>/dev/null
 	$(RUNTIME) rmi $(IMAGE) 2>/dev/null || true
