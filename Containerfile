@@ -64,8 +64,15 @@ RUN set -eux; \
 RUN groupadd --system claude \
     && useradd --system --gid claude --create-home --home-dir /home/claude --shell /bin/bash claude
 
-# Install Claude Code globally (always latest published version)
-RUN npm install -g @anthropic-ai/claude-code
+# Install Claude Code globally.
+# Pin CLAUDE_CODE_VERSION at build time for reproducibility, e.g.:
+#   make build CLAUDE_CODE_VERSION=1.2.3
+# The default 'latest' fetches whatever is current on the registry.
+# npm audit signatures verifies the package's npm provenance attestation,
+# failing-closed if the tarball is unsigned, tampered, or unattested.
+ARG CLAUDE_CODE_VERSION=latest
+RUN npm install -g @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+    && npm audit signatures
 
 # Create the workspace directory that the user's project will be mounted into
 RUN mkdir -p /workspace && chown claude:claude /workspace

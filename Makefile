@@ -1,5 +1,6 @@
-IMAGE   ?= slawdcode:latest
-RUNTIME ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
+IMAGE               ?= slawdcode:latest
+RUNTIME             ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
+CLAUDE_CODE_VERSION ?=
 
 .PHONY: build auth install run clean help
 
@@ -8,7 +9,9 @@ help: ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 build: ## Build the container image
-	$(RUNTIME) build -t $(IMAGE) .
+	$(RUNTIME) build \
+		$(if $(CLAUDE_CODE_VERSION),--build-arg CLAUDE_CODE_VERSION=$(CLAUDE_CODE_VERSION),) \
+		-t $(IMAGE) .
 
 auth: ## Authenticate with Claude (one-time OAuth browser login)
 	./scripts/slawdcode-auth

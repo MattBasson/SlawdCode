@@ -15,6 +15,9 @@ param(
     [Parameter(Position = 0)]
     [string]$Target = 'help',
 
+    # Pin Claude Code to a specific npm version, e.g. '1.2.3'. Default: latest.
+    [string]$ClaudeCodeVersion = '',
+
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Rest
 )
@@ -58,7 +61,12 @@ switch ($Target.ToLowerInvariant()) {
     }
     'build' {
         $Runtime = Resolve-Runtime
-        & $Runtime build -t $Image $RepoRoot
+        $BuildArgs = @('build', '-t', $Image)
+        if ($ClaudeCodeVersion) {
+            $BuildArgs += @('--build-arg', "CLAUDE_CODE_VERSION=$ClaudeCodeVersion")
+        }
+        $BuildArgs += $RepoRoot
+        & $Runtime @BuildArgs
         exit $LASTEXITCODE
     }
     'clean' {
