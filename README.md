@@ -64,7 +64,9 @@ claude "explain this codebase"
 
 ### Preferred: OAuth browser login (recommended)
 
-Run once per machine. A browser window opens for you to sign in with your Anthropic account. Tokens are written to your **host machine** (`~/.claude/` and `~/.claude.json`) and re-used by every subsequent `claude` invocation — they are never baked into the container image.
+Run once per machine. A browser window opens for you to sign in with your Anthropic account. Tokens are written to your **host machine** (`~/.claude.json` for session metadata, `~/.claude/.credentials.json` for the OAuth access / refresh tokens) and re-used by every subsequent `claude` invocation — they are never baked into the container image.
+
+> **Under the hood:** `slawdcode-auth` does *not* use a bind mount for `~/.claude/.credentials.json` (Claude Code's atomic-rename write of that file doesn't survive bind mounts across the WSL2 → 9p → NTFS path on Podman/Docker Desktop). Instead the auth flow runs in a named container, lets Claude Code write the file inside the container's own filesystem, then the wrapper uses `podman cp` / `docker cp` to extract it to the host. The regular `claude` wrapper then bind-mounts that host file at startup so Claude Code can read the token. Full design in [`docs/AUTH-PERSISTENCE.md`](docs/AUTH-PERSISTENCE.md).
 
 ```bash
 # Linux / macOS / WSL2
@@ -102,14 +104,16 @@ Your shell
                       └─ api.anthropic.com
 ```
 
-**By default, four host paths are mounted into the container:**
+**By default, four host paths are mounted into the container by the `claude` wrapper:**
 
 | Host path | Container path | Purpose |
 |---|---|---|
 | `$PWD` (current dir) | `/workspace` | Your project files |
-| `~/.claude` | `/home/claude/.claude` | Project history, MCP server config |
+| `~/.claude` | `/home/claude/.claude` | Project history, MCP server config, settings |
 | `~/.claude.json` | `/home/claude/.claude.json` | Claude Code session metadata |
-| `~/.claude/.credentials.json` | `/home/claude/.claude/.credentials.json` | OAuth access / refresh tokens (mounted as a single file on top of the directory mount so it persists reliably on Windows-backed bind mounts) |
+| `~/.claude/.credentials.json` | `/home/claude/.claude/.credentials.json` | OAuth access / refresh tokens (so Claude Code can read them at session start) |
+
+> **How the OAuth token gets there:** `slawdcode-auth` uses a *different* mount layout — it runs without the `~/.claude/` directory mount because Claude Code's atomic-rename write of `.credentials.json` doesn't survive that mount on Windows. After the auth flow completes, the wrapper extracts the credentials file from the container with `podman cp` / `docker cp` and writes it to the host. The regular `claude` wrapper then bind-mounts that host file so Claude Code can read the token at startup. See [Authentication](#authentication) below and the [auth-persistence design doc](docs/AUTH-PERSISTENCE.md) for the full story.
 
 When `SLAWDCODE_PERSIST_CLOUD_CREDS=1`, three additional **opt-in** mounts are added so the bundled cloud CLIs keep their auth state across runs:
 
@@ -188,7 +192,7 @@ git pull
 .\scripts\make.ps1 install
 ```
 
-> If the rebuilt image asks you to `/login` again, Claude Code's on-disk auth layout has changed between releases. Re-run `slawdcode-auth` once to refresh the host-side `~/.claude.json` token, then `claude` will pick it up on the next run.
+> If the rebuilt image asks you to `/login` again, Claude Code's on-disk auth layout may have changed between releases. Re-run `slawdcode-auth` once to refresh the host-side credentials; see [Troubleshooting → "Claude keeps prompting /login"](#claude-keeps-prompting-login-after-slawdcode-auth) if a fresh auth still doesn't stick.
 
 ### Updating only Claude Code
 
@@ -309,7 +313,11 @@ podman-compose -f compose\podman-compose.yml run --rm claude --help
 docker compose -f compose\podman-compose.yml run --rm claude --help
 ```
 
-The `slawdcode-auth` and `claude` wrapper scripts auto-create `~/.claude.json` if it's missing, but compose does not — without the touch step the runtime will create it as a *directory* the first time and break the OAuth login flow.
+The `slawdcode-auth` and `claude` wrapper scripts auto-create `~/.claude.json` (and `~/.claude/.credentials.json`) if missing; compose does not, so the runtime will create them as *directories* on first use and break Claude Code's startup. Touch both files first.
+
+> **Compose doesn't run the OAuth-flow workaround.** Compose just bind-mounts everything, so if you're on Windows + Podman/Docker Desktop you'll hit the same `.credentials.json` persistence problem that `slawdcode-auth` works around with `podman cp`. Either:
+> - Authenticate via the bash/PowerShell `slawdcode-auth` wrapper *once* (it'll populate `~/.claude/.credentials.json` on the host), then use compose only for the regular `claude` runs, or
+> - Skip OAuth and use `ANTHROPIC_API_KEY` (set it in `.env` next to the compose file, or export it in your shell before `compose run`).
 
 ---
 
@@ -322,39 +330,53 @@ Claude Code parses `~/.claude.json` on startup and refuses to run if it isn't va
 1. Update the wrappers (`git pull` + `make install` / `.\scripts\make.ps1 install`) — the wrappers now initialize the file with `{}`.
 2. For an already-broken file, either choose **"2. Reset with default configuration"** in the in-container prompt, or run on the host: `Remove-Item $HOME\.claude.json` (PowerShell) / `rm ~/.claude.json` (bash) and re-run `slawdcode-auth`.
 
-### Claude keeps prompting `/login` after a fresh build
+### Claude keeps prompting `/login` after `slawdcode-auth`
 
-Claude Code stores its OAuth access/refresh tokens in `~/.claude/.credentials.json` and broader session metadata in `~/.claude.json`. If `slawdcode-auth` writes the token but the next `claude` invocation still asks you to `/login` (especially with a "Welcome back" banner alongside the "Not logged in" status), one of these is usually wrong:
+The expected flow is:
+1. `slawdcode-auth` → device-code OAuth flow → `Login successful.` → host gains `~/.claude.json` (~1–3 KB) and `~/.claude/.credentials.json` (~400–500 B).
+2. `claude` reads both files via bind mounts and starts up logged in.
 
-1. The image is stale and predates the wrapper's bind mounts — `make clean && make build` (or `.\scripts\make.ps1 clean ; .\scripts\make.ps1 build`) and re-run `slawdcode-auth`.
-2. Either `~/.claude.json` or `~/.claude/.credentials.json` exists on the host as an empty *directory* (the runtime created it on a previous run when the file was missing) — delete both (`rm -rf ~/.claude.json ~/.claude/.credentials.json`) and re-run `slawdcode-auth`; the wrappers recreate each as a 600-perm file initialized with `{}`.
+If step 2 still says `Not logged in`, walk through these in order:
 
-> **Windows / Podman Desktop / Docker Desktop note:** Claude Code writes `.credentials.json` via an atomic-rename pattern that doesn't survive the WSL2 → 9p → NTFS bind-mount path. To get the tokens onto the host, `slawdcode-auth` runs the auth flow **without bind-mounting `~/.claude/`** (the auth flow only needs `.claude.json`), lets Claude Code write into the container's own filesystem, then uses `podman cp` / `docker cp` to extract `.credentials.json` to the host. The regular `claude` wrapper still bind-mounts `~/.claude/` afterwards — that mount works fine for *reading* the credentials file we just persisted, and for projects/history/settings (the files that *do* go through the bind mount cleanly).
->
-> If even the `cp` workaround fails (the wrapper prints `Warning: '<runtime> cp' did not deliver .credentials.json to the host.`), the named container is left in place so you can extract the file manually, and the OAuth flow may genuinely not be persistable on your runtime/host combo. **The most reliable workaround in that case is to skip OAuth entirely:**
->
-> ```powershell
-> # Windows (PowerShell) — get an API key from your Anthropic console
-> $env:ANTHROPIC_API_KEY = 'sk-ant-...'
-> claude
-> ```
->
-> ```bash
-> # Linux / macOS / WSL2
-> export ANTHROPIC_API_KEY='sk-ant-...'
-> claude
-> ```
->
-> The API key is passed straight through `--env` and never written to disk by the container. For enterprise plans with "API Usage Billing" (the same plan that supports OAuth via SlawdCode), an API key from your org console is the most reliable auth path on Windows hosts.
-3. **(Windows / Podman Desktop)** Your host path didn't translate correctly into the container's bind mount. Run with `SLAWDCODE_DEBUG=1` to see the resolved paths and the exact `podman run` command:
+1. **Stale wrappers / image.** Pull, rebuild, reinstall:
+   ```bash
+   cd /path/to/SlawdCode && git pull
+   make clean && make build          # or .\scripts\make.ps1 clean ; .\scripts\make.ps1 build
+   make install                       # or .\scripts\make.ps1 install
+   ```
+   Then re-run `slawdcode-auth`.
 
-   ```powershell
-   $env:SLAWDCODE_DEBUG = '1'
-   slawdcode-auth     # then re-run claude with the same env var set
+2. **Corrupt host files.** If either host file exists as an empty *directory* (the runtime created it that way on an older wrapper version), remove and retry:
+   ```bash
+   rm -rf ~/.claude.json ~/.claude/.credentials.json
+   slawdcode-auth
    ```
 
-   The printed `HostSession` line should be `C:/Users/<you>/.claude.json` (forward slashes, drive letter preserved). The older `/c/Users/...` form was changed in this commit because Podman Desktop's WSL2 backend treats it as a Unix path under `/c` and silently mounts an empty source — make sure the version of the wrappers you installed (`~/.local/bin\claude.ps1` or wherever `make install` put them) has been refreshed since this fix landed.
-4. You're invoking `podman` / `docker` directly without the SlawdCode wrappers — make sure your `run` command includes both `--volume ~/.claude:/home/claude/.claude` *and* `--volume ~/.claude.json:/home/claude/.claude.json`.
+3. **Run with `SLAWDCODE_DEBUG=1`** to see the resolved paths, the runtime command, and the actual `cp` output:
+   ```powershell
+   $env:SLAWDCODE_DEBUG = '1' ; slawdcode-auth
+   ```
+   ```bash
+   SLAWDCODE_DEBUG=1 slawdcode-auth
+   ```
+   On Windows the printed `HostSession` should be `C:/Users/<you>/.claude.json` (forward slashes, drive letter preserved). After the auth flow, both `cp` lines should report `exit 0`. If they don't, the wrapper now prints the actual error message — paste it into an issue.
+
+4. **`cp` legitimately failed and the wrapper left the auth container around.** The warning message gives you the container name; you can extract manually:
+   ```bash
+   podman cp <auth-container-name>:/home/claude/.claude/.credentials.json ~/.claude/.credentials.json
+   podman rm -f <auth-container-name>
+   ```
+
+5. **Last-resort: bypass OAuth entirely.** Some host/runtime combinations may not be able to persist the OAuth flow at all. For enterprise plans (the same ones SlawdCode supports for OAuth), an API key from your Anthropic console works through the same wrapper:
+   ```powershell
+   $env:ANTHROPIC_API_KEY = 'sk-ant-...'   # Windows (PowerShell)
+   claude
+   ```
+   ```bash
+   export ANTHROPIC_API_KEY='sk-ant-...'   # Linux / macOS / WSL2
+   claude
+   ```
+   The key is passed via `--env`; it's never written to disk by the container.
 
 ### `make.ps1 install` errors with `Cannot bind argument to parameter 'Path' because it is an empty string`
 
@@ -381,7 +403,15 @@ The cloud CLIs' credentials aren't persisted by default. Set `SLAWDCODE_PERSIST_
 ## Windows Notes
 
 - `scripts/make.ps1` is the PowerShell equivalent of the `Makefile` and exposes the same `build`, `auth`, `install`, `run`, `clean`, and `help` targets — Windows users do not need to install GNU make.
-- The PowerShell wrapper (`scripts/claude.ps1`) automatically converts Windows paths (e.g. `C:\Users\foo\project`) to Unix-style paths (`/c/Users/foo/project`) for volume mounts.
+- The PowerShell wrappers convert Windows paths (`C:\Users\foo\project`) to a forward-slash form with the drive letter intact (`C:/Users/foo/project`) for volume mounts. The older Git-Bash style `/c/Users/...` is **not** used — Podman Desktop's WSL2 backend treats that as a literal Unix path under `/c` and silently mounts an empty source.
 - `.cmd` shims are installed alongside the `.ps1` scripts so `claude` and `slawdcode-auth` work from both **cmd.exe** and **PowerShell** without typing the extension.
 - WSL2 users can use the bash scripts (`scripts/claude`, `scripts/slawdcode-auth`) and the `Makefile` targets directly — there is no need for the PowerShell wrappers inside WSL2.
 - Ensure Podman Desktop (or Docker Desktop) is running before using the commands.
+- The auth flow uses `podman cp` to extract `~/.claude/.credentials.json` from the container after `auth login`, working around a known WSL2 → 9p → NTFS bind-mount quirk. See [Authentication](#authentication) for details, or [`docs/AUTH-PERSISTENCE.md`](docs/AUTH-PERSISTENCE.md) for the full design.
+
+---
+
+## Further reading
+
+- [`docs/AUTH-PERSISTENCE.md`](docs/AUTH-PERSISTENCE.md) — Technical deep-dive on how OAuth state is persisted across container runs, including the Windows bind-mount quirk we work around and the failure modes we've ruled out.
+- [`CONTEXT.md`](CONTEXT.md) — Project context, design rationale, and the chronological debugging journey that produced the current auth flow. Read this before "fixing" something that looks weird in the wrappers — it probably *is* weird, for a documented reason.
