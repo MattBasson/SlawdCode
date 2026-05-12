@@ -196,7 +196,7 @@ git pull
 
 ### Updating only Claude Code
 
-If you don't need newer SlawdCode wrappers or `Containerfile` changes, skip the `git pull` and rebuild in place — every `make build` re-runs `npm install -g @anthropic-ai/claude-code`, which fetches the latest published version:
+If you don't need newer SlawdCode wrappers or `Containerfile` changes, skip the `git pull` and rebuild in place — every `make build` re-runs `npm install -g @anthropic-ai/claude-code`, which fetches the latest published version, and `npm audit signatures` verifies the package's npm provenance attestation before it is baked into the image:
 
 ```bash
 # Linux / macOS / WSL2
@@ -208,6 +208,22 @@ make clean && make build
 .\scripts\make.ps1 clean
 .\scripts\make.ps1 build
 ```
+
+### Pinning Claude Code to a specific version
+
+By default, `make build` installs the latest `@anthropic-ai/claude-code` from the npm registry. To pin a specific, previously-reviewed version:
+
+```bash
+# Linux / macOS / WSL2
+make build CLAUDE_CODE_VERSION=1.2.3
+```
+
+```powershell
+# Windows (PowerShell)
+.\scripts\make.ps1 build -ClaudeCodeVersion 1.2.3
+```
+
+`npm audit signatures` runs after every install. A missing or invalid npm provenance attestation — whether from a registry compromise, a hijacked maintainer token, or a transitive-dep typosquat — causes the build to fail closed with a clear error before the bad package is baked into the image.
 
 ---
 
