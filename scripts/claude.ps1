@@ -13,6 +13,11 @@ $ErrorActionPreference = 'Stop'
 # --- Configuration ---
 $Image = if ($env:SLAWDCODE_IMAGE) { $env:SLAWDCODE_IMAGE } else { 'slawdcode:latest' }
 
+# L11: soft warning for images that don't look like locally built slawdcode images.
+if ($Image -notmatch '^slawdcode[:/]') {
+    Write-Warning "SLAWDCODE_IMAGE='$Image' does not start with 'slawdcode/' — using a custom image."
+}
+
 # Auto-detect container runtime (prefer podman for rootless operation)
 $Runtime = $env:SLAWDCODE_RUNTIME
 if (-not $Runtime) {
@@ -165,6 +170,17 @@ if ($env:SLAWDCODE_DEBUG -match '^(?i:1|true|yes)$') {
     Write-Host "Command:"
     Write-Host ("  {0} {1}" -f $Runtime, ($RunArgs -join ' '))
     Write-Host '-----------------------' -ForegroundColor Cyan
+}
+
+# L4: resource limits — override with SLAWDCODE_PIDS_LIMIT / SLAWDCODE_MEMORY; set to 'none' to disable.
+$PidsLimit = if ($env:SLAWDCODE_PIDS_LIMIT) { $env:SLAWDCODE_PIDS_LIMIT } else { '512' }
+$Memory    = if ($env:SLAWDCODE_MEMORY)     { $env:SLAWDCODE_MEMORY }     else { '4g' }
+if ($PidsLimit -ne 'none') { $RunArgs += @('--pids-limit', $PidsLimit) }
+if ($Memory    -ne 'none') { $RunArgs += @('--memory',     $Memory)    }
+
+# L5: read-only rootfs (opt-in) — set SLAWDCODE_READONLY_ROOTFS=1.
+if ($env:SLAWDCODE_READONLY_ROOTFS -match '^(?i:1|true|yes)$') {
+    $RunArgs += @('--read-only', '--tmpfs', '/tmp:mode=1777', '--tmpfs', '/home/claude/.cache:mode=0700')
 }
 
 & $Runtime @RunArgs

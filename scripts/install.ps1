@@ -33,7 +33,9 @@ if (-not $InstallDir) {
     $InstallDir = Join-Path (Get-UserHome) '.local\bin'
 }
 
-$RepoRaw = 'https://raw.githubusercontent.com/MattBasson/SlawdCode/main'
+# L1: honor SLAWDCODE_REF so piped installs can target a specific tag/commit.
+$RepoRef = if ($env:SLAWDCODE_REF) { $env:SLAWDCODE_REF } else { 'main' }
+$RepoRaw = "https://raw.githubusercontent.com/MattBasson/SlawdCode/$RepoRef"
 
 Write-Host 'SlawdCode Installer'
 Write-Host '==================='
@@ -43,11 +45,19 @@ if (-not (Test-Path $InstallDir)) {
     New-Item -ItemType Directory -Path $InstallDir | Out-Null
 }
 
-Write-Host "Downloading scripts to $InstallDir ..."
-
-# Download PowerShell scripts
-Invoke-WebRequest "$RepoRaw/scripts/claude.ps1"          -OutFile (Join-Path $InstallDir 'claude.ps1')
-Invoke-WebRequest "$RepoRaw/scripts/slawdcode-auth.ps1"  -OutFile (Join-Path $InstallDir 'slawdcode-auth.ps1')
+# L2: if running from a local checkout (sibling directory), copy local scripts.
+$ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
+$LocalClaude = Join-Path $ScriptDir 'claude.ps1'
+$LocalAuth   = Join-Path $ScriptDir 'slawdcode-auth.ps1'
+if ((Test-Path $LocalClaude) -and (Test-Path $LocalAuth)) {
+    Write-Host "Using local scripts from $ScriptDir ..."
+    Copy-Item $LocalClaude (Join-Path $InstallDir 'claude.ps1')
+    Copy-Item $LocalAuth   (Join-Path $InstallDir 'slawdcode-auth.ps1')
+} else {
+    Write-Host "Downloading scripts (ref: $RepoRef) to $InstallDir ..."
+    Invoke-WebRequest "$RepoRaw/scripts/claude.ps1"          -OutFile (Join-Path $InstallDir 'claude.ps1')
+    Invoke-WebRequest "$RepoRaw/scripts/slawdcode-auth.ps1"  -OutFile (Join-Path $InstallDir 'slawdcode-auth.ps1')
+}
 
 # Create .cmd shims so the commands work from cmd.exe and PowerShell
 # without having to type the .ps1 extension

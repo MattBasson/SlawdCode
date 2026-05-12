@@ -28,9 +28,19 @@ RUN set -eux; \
 
 # GitHub CLI (gh) — installed from the official cli.github.com apt repository
 # so the version stays current at build time. https://github.com/cli/cli
+# Optionally verify the GPG key fingerprint (look it up at cli.github.com/manual/installation):
+#   make build GH_KEY_FINGERPRINT='<fingerprint>'
+ARG GH_KEY_FINGERPRINT=
 RUN set -eux; \
     curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
         | gpg --dearmor -o /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
+    if [ -n "${GH_KEY_FINGERPRINT}" ]; then \
+        actual=$(gpg --no-default-keyring \
+                     --keyring /etc/apt/keyrings/githubcli-archive-keyring.gpg \
+                     --fingerprint 2>/dev/null | grep -A1 'pub' | grep -v 'pub' | tr -d ' :'); \
+        expected=$(printf '%s' "${GH_KEY_FINGERPRINT}" | tr -d ' :'); \
+        [ "$actual" = "$expected" ] || { echo "GH key fingerprint mismatch: got $actual"; exit 1; }; \
+    fi; \
     chmod go+r /etc/apt/keyrings/githubcli-archive-keyring.gpg; \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
         > /etc/apt/sources.list.d/github-cli.list; \
@@ -41,9 +51,19 @@ RUN set -eux; \
 # Azure CLI (az) — installed from packages.microsoft.com, the
 # Microsoft-maintained apt repository for Azure CLI on Debian/Ubuntu.
 # https://learn.microsoft.com/cli/azure/install-azure-cli-linux
+# Optionally verify the GPG key fingerprint:
+#   make build MS_KEY_FINGERPRINT='<fingerprint>'
+ARG MS_KEY_FINGERPRINT=
 RUN set -eux; \
     curl -fsSL https://packages.microsoft.com/keys/microsoft.asc \
         | gpg --dearmor -o /etc/apt/keyrings/microsoft.gpg; \
+    if [ -n "${MS_KEY_FINGERPRINT}" ]; then \
+        actual=$(gpg --no-default-keyring \
+                     --keyring /etc/apt/keyrings/microsoft.gpg \
+                     --fingerprint 2>/dev/null | grep -A1 'pub' | grep -v 'pub' | tr -d ' :'); \
+        expected=$(printf '%s' "${MS_KEY_FINGERPRINT}" | tr -d ' :'); \
+        [ "$actual" = "$expected" ] || { echo "MS key fingerprint mismatch: got $actual"; exit 1; }; \
+    fi; \
     chmod go+r /etc/apt/keyrings/microsoft.gpg; \
     echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/azure-cli/ bookworm main" \
         > /etc/apt/sources.list.d/azure-cli.list; \

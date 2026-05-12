@@ -113,6 +113,10 @@ Your shell
 | `~/.claude.json` | `/home/claude/.claude.json` | Claude Code session metadata |
 | `~/.claude/.credentials.json` | `/home/claude/.claude/.credentials.json` | OAuth access / refresh tokens (so Claude Code can read them at session start) |
 
+> **L7 note:** `$PWD` is mounted read-write. If you run `claude` from a sensitive directory (e.g. `~/` or `/etc`), the entire subtree is readable and writable by Claude Code inside the container. Always `cd` into your project directory first.
+
+> **L9 note:** All volume mounts use `:z` (shared SELinux label). If you are on an SELinux host and need private labelling so other containers cannot read the mounted files, change `:z` to `:Z` in your `SLAWDCODE_EXTRA_ARGS` overrides, or modify the wrapper scripts directly.
+
 > **How the OAuth token gets there:** `slawdcode-auth` uses a *different* mount layout — it runs without the `~/.claude/` directory mount because Claude Code's atomic-rename write of `.credentials.json` doesn't survive that mount on Windows. After the auth flow completes, the wrapper extracts the credentials file from the container with `podman cp` / `docker cp` and writes it to the host. The regular `claude` wrapper then bind-mounts that host file so Claude Code can read the token at startup. See [Authentication](#authentication) below and the [auth-persistence design doc](docs/AUTH-PERSISTENCE.md) for the full story.
 
 When `SLAWDCODE_PERSIST_CLOUD_CREDS=1`, three additional **opt-in** mounts are added so the bundled cloud CLIs keep their auth state across runs:
@@ -122,6 +126,8 @@ When `SLAWDCODE_PERSIST_CLOUD_CREDS=1`, three additional **opt-in** mounts are a
 | `~/.config/gh` | `/home/claude/.config/gh` | GitHub CLI auth (`gh auth login`) |
 | `~/.aws` | `/home/claude/.aws` | AWS CLI credentials and config |
 | `~/.azure` | `/home/claude/.azure` | Azure CLI auth (`az login`) |
+
+> **L3 note:** When `SLAWDCODE_PERSIST_CLOUD_CREDS=1`, Claude Code inside the container can make authenticated API calls to GitHub, AWS, and Azure using your host credentials. Only enable this if you trust the commands Claude Code will run in your session.
 
 Everything else on your machine is invisible to the container.
 
