@@ -15,6 +15,9 @@ param(
     [Parameter(Position = 0)]
     [string]$Target = 'help',
 
+    # Optional digest-pinned base image, e.g. 'node:20-bookworm-slim@sha256:<digest>'
+    [string]$BaseImage = '',
+
     [Parameter(ValueFromRemainingArguments = $true)]
     [string[]]$Rest
 )
@@ -58,7 +61,12 @@ switch ($Target.ToLowerInvariant()) {
     }
     'build' {
         $Runtime = Resolve-Runtime
-        & $Runtime build -t $Image $RepoRoot
+        $BuildArgs = @('build', '-t', $Image)
+        if ($BaseImage) {
+            $BuildArgs += @('--build-arg', "NODE_BASE_IMAGE=$BaseImage")
+        }
+        $BuildArgs += $RepoRoot
+        & $Runtime @BuildArgs
         if ($LASTEXITCODE -eq 0) {
             $id = (& $Runtime inspect --format '{{.Id}}' $Image 2>$null) | Select-Object -First 1
             if ($id) {
