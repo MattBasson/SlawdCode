@@ -59,6 +59,15 @@ switch ($Target.ToLowerInvariant()) {
     'build' {
         $Runtime = Resolve-Runtime
         & $Runtime build -t $Image $RepoRoot
+        if ($LASTEXITCODE -eq 0) {
+            $id = (& $Runtime inspect --format '{{.Id}}' $Image 2>$null) | Select-Object -First 1
+            if ($id) {
+                Write-Host ''
+                Write-Host ("Image ID:  {0}" -f $id)
+                Write-Host 'To pin this exact build, set:'
+                Write-Host ("  `$env:SLAWDCODE_IMAGE = '{0}@{1}'" -f $Image, $id)
+            }
+        }
         exit $LASTEXITCODE
     }
     'clean' {

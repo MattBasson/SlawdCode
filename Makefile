@@ -9,6 +9,11 @@ help: ## Show this help
 
 build: ## Build the container image
 	$(RUNTIME) build -t $(IMAGE) .
+	@echo ""
+	@id=$$($(RUNTIME) inspect --format '{{.Id}}' $(IMAGE) 2>/dev/null); \
+	 echo "Image ID:  $$id"; \
+	 echo "To pin this exact build, export:"; \
+	 echo "  export SLAWDCODE_IMAGE='$(IMAGE)@$$id'"
 
 auth: ## Authenticate with Claude (one-time OAuth browser login)
 	./scripts/slawdcode-auth

@@ -223,6 +223,28 @@ All configuration is done via environment variables:
 | `SLAWDCODE_PERSIST_CLOUD_CREDS` | _(empty)_ | Set to `1` / `true` / `yes` to mount `~/.config/gh`, `~/.aws`, and `~/.azure` so `gh`, `aws`, and `az` auth persists across runs (host dirs are auto-created) |
 | `ANTHROPIC_API_KEY` | _(empty)_ | API key fallback (CI/automation only) |
 
+### Pinning the image to a digest
+
+Every `make build` / `.\scripts\make.ps1 build` prints the content-addressable image ID and a ready-to-copy export line:
+
+```text
+Image ID:  sha256:abc123...
+To pin this exact build, export:
+  export SLAWDCODE_IMAGE='slawdcode:latest@sha256:abc123...'
+```
+
+Export that line (or set `$env:SLAWDCODE_IMAGE` on Windows) before invoking `claude`. The container runtime will refuse to start if the locally cached image no longer matches the digest — protecting against a poisoned local image cache or an unintended out-of-band update.
+
+To look up the digest of an already-built image without rebuilding:
+
+```bash
+podman inspect --format '{{.Id}}' slawdcode:latest
+```
+
+```powershell
+podman inspect --format '{{.Id}}' slawdcode:latest
+```
+
 ### Enterprise / Proxy
 
 Pass extra runtime flags via `SLAWDCODE_EXTRA_ARGS`:
