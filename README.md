@@ -211,6 +211,60 @@ make clean && make build
 
 ---
 
+## Uninstalling
+
+Uninstall is the inverse of install: it removes the `claude` and
+`slawdcode-auth` wrapper scripts, the `slawdcode:latest` image, and any stale
+`slawdcode-auth-*` containers.
+
+```bash
+# Linux / macOS / WSL2 — from a clone:
+make uninstall
+
+# …or standalone (no clone needed):
+bash scripts/uninstall.sh
+curl -fsSL https://raw.githubusercontent.com/MattBasson/SlawdCode/main/scripts/uninstall.sh | bash
+```
+
+```powershell
+# Windows (PowerShell) — from a clone:
+.\scripts\make.ps1 uninstall
+
+# …or standalone:
+.\scripts\uninstall.ps1
+Invoke-WebRequest https://raw.githubusercontent.com/MattBasson/SlawdCode/main/scripts/uninstall.ps1 | Invoke-Expression
+```
+
+If you installed the wrappers to a non-default directory, pass it as the last
+argument (e.g. `bash scripts/uninstall.sh /opt/bin` or
+`.\scripts\uninstall.ps1 C:\tools\bin`).
+
+### Keeping or removing your credentials
+
+By default uninstall **leaves your Claude auth/config in place** —
+`~/.claude/`, `~/.claude.json`, and `~/.claude/.credentials.json`. These files
+are shared with a native (non-containerized) Claude Code install, so removing
+them would log that out too.
+
+To delete them as well, add the purge flag — only do this if you do **not** use
+Claude Code outside of SlawdCode:
+
+```bash
+# Linux / macOS / WSL2
+bash scripts/uninstall.sh --purge-credentials
+```
+
+```powershell
+# Windows (PowerShell)
+.\scripts\uninstall.ps1 -PurgeCredentials
+```
+
+> Uninstall does not modify your `PATH`. If you added the install dir to your
+> shell profile (`~/.bashrc` / `~/.zshrc`) or User PATH during install, remove
+> that entry manually — the uninstall output prints a ready-to-run command for Windows.
+
+---
+
 ## Configuration
 
 All configuration is done via environment variables:
@@ -288,12 +342,13 @@ claude --help
 ### Linux / macOS / WSL2
 
 ```
-make build    Build the container image
-make auth     Authenticate with Claude (one-time OAuth login)
-make install  Install 'claude' and 'slawdcode-auth' commands to ~/.local/bin
-make run      Open an interactive Claude Code session in the current directory
-make clean    Remove the local container image
-make help     Show all available targets
+make build      Build the container image
+make auth       Authenticate with Claude (one-time OAuth login)
+make install    Install 'claude' and 'slawdcode-auth' commands to ~/.local/bin
+make uninstall  Remove the installed commands, the image, and stale auth containers
+make run        Open an interactive Claude Code session in the current directory
+make clean      Remove the local container image
+make help       Show all available targets
 ```
 
 ### Windows (PowerShell)
@@ -301,12 +356,13 @@ make help     Show all available targets
 PowerShell has no built-in `make`, so use the bundled wrapper which exposes the same targets:
 
 ```powershell
-.\scripts\make.ps1 build     # Build the container image
-.\scripts\make.ps1 auth      # Authenticate with Claude (one-time OAuth login)
-.\scripts\make.ps1 install   # Install 'claude' and 'slawdcode-auth' commands
-.\scripts\make.ps1 run       # Open an interactive Claude Code session in the current directory
-.\scripts\make.ps1 clean     # Remove the local container image
-.\scripts\make.ps1 help      # Show all available targets
+.\scripts\make.ps1 build      # Build the container image
+.\scripts\make.ps1 auth       # Authenticate with Claude (one-time OAuth login)
+.\scripts\make.ps1 install    # Install 'claude' and 'slawdcode-auth' commands
+.\scripts\make.ps1 uninstall  # Remove the installed commands, image, and stale auth containers
+.\scripts\make.ps1 run        # Open an interactive Claude Code session in the current directory
+.\scripts\make.ps1 clean      # Remove the local container image
+.\scripts\make.ps1 help       # Show all available targets
 ```
 
 The same `SLAWDCODE_IMAGE` and `SLAWDCODE_RUNTIME` environment variables apply.

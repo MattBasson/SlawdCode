@@ -1,7 +1,7 @@
 IMAGE   ?= slawdcode:latest
 RUNTIME ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
 
-.PHONY: build auth install run clean help
+.PHONY: build auth install uninstall run clean help
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
@@ -20,6 +20,9 @@ auth: ## Authenticate with Claude (one-time OAuth browser login)
 
 install: ## Install the 'claude' and 'slawdcode-auth' commands to ~/.local/bin
 	./scripts/install.sh
+
+uninstall: ## Remove the installed commands, the image, and stale auth containers
+	./scripts/uninstall.sh
 
 run: ## Open an interactive Claude Code session in the current directory
 	./scripts/claude
