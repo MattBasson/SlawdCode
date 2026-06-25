@@ -6,6 +6,7 @@
 #   build    Build the container image
 #   auth     Authenticate with Claude (one-time OAuth browser login)
 #   install  Install 'claude' and 'slawdcode-auth' commands to %USERPROFILE%\.local\bin
+#   uninstall Remove the installed commands, the image, and stale auth containers
 #   run      Open an interactive Claude Code session in the current directory
 #   clean    Remove the local container image
 #   help     Show this help
@@ -43,6 +44,7 @@ function Show-Help {
     Write-Host '  build    Build the container image'
     Write-Host '  auth     Authenticate with Claude (one-time OAuth browser login)'
     Write-Host '  install  Install ''claude'' and ''slawdcode-auth'' commands to %USERPROFILE%\.local\bin'
+    Write-Host '  uninstall Remove the installed commands, the image, and stale auth containers'
     Write-Host '  run      Open an interactive Claude Code session in the current directory'
     Write-Host '  clean    Remove the local container image'
     Write-Host '  help     Show this help'
@@ -91,6 +93,10 @@ switch ($Target.ToLowerInvariant()) {
     }
     'install' {
         & (Join-Path $ScriptDir 'install.ps1') @Rest
+        exit $LASTEXITCODE
+    }
+    'uninstall' {
+        & (Join-Path $ScriptDir 'uninstall.ps1') @Rest
         exit $LASTEXITCODE
     }
     'run' {
