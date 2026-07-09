@@ -1,5 +1,6 @@
-IMAGE   ?= slawdcode:latest
-RUNTIME ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
+IMAGE          ?= slawdcode:latest
+RUNTIME        ?= $(shell command -v podman 2>/dev/null || command -v docker 2>/dev/null)
+NODE_BASE_IMAGE ?=
 
 .PHONY: build auth install uninstall run clean help
 
@@ -8,7 +9,9 @@ help: ## Show this help
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-12s\033[0m %s\n", $$1, $$2}'
 
 build: ## Build the container image
-	$(RUNTIME) build -t $(IMAGE) .
+	$(RUNTIME) build \
+		$(if $(NODE_BASE_IMAGE),--build-arg NODE_BASE_IMAGE=$(NODE_BASE_IMAGE),) \
+		-t $(IMAGE) .
 	@echo ""
 	@id=$$($(RUNTIME) inspect --format '{{.Id}}' $(IMAGE) 2>/dev/null); \
 	 echo "Image ID:  $$id"; \

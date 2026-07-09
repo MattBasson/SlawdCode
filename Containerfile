@@ -3,7 +3,10 @@
 # Compatible with Podman (rootless) and Docker.
 
 ARG NODE_VERSION=20
-FROM node:${NODE_VERSION}-bookworm-slim
+# Override NODE_BASE_IMAGE with a digest-pinned reference for reproducible builds:
+#   make build NODE_BASE_IMAGE='node:20-bookworm-slim@sha256:<digest>'
+ARG NODE_BASE_IMAGE=node:${NODE_VERSION}-bookworm-slim
+FROM ${NODE_BASE_IMAGE}
 
 # Shell + tooling that Claude Code's in-session Bash tool relies on, plus
 # everything required to install the cloud CLIs from upstream repositories.

@@ -299,6 +299,28 @@ podman inspect --format '{{.Id}}' slawdcode:latest
 podman inspect --format '{{.Id}}' slawdcode:latest
 ```
 
+### Pinning the base image to a digest
+
+The `Containerfile` defaults to `node:20-bookworm-slim` — a floating tag that changes on every upstream release. For reproducible, supply-chain-safe builds, override it with a digest-pinned reference:
+
+```bash
+# 1. Look up the current digest
+podman pull node:20-bookworm-slim
+podman inspect --format '{{index .RepoDigests 0}}' node:20-bookworm-slim
+# → node:20-bookworm-slim@sha256:abc123...
+
+# 2. Build against that exact digest
+make build NODE_BASE_IMAGE='node:20-bookworm-slim@sha256:abc123...'
+```
+
+```powershell
+# Windows (PowerShell)
+podman pull node:20-bookworm-slim
+podman inspect --format '{{index .RepoDigests 0}}' node:20-bookworm-slim
+.\scripts\make.ps1 build -BaseImage 'node:20-bookworm-slim@sha256:abc123...'
+```
+
+Passing a wrong or tampered digest fails the build immediately with a clear "manifest not found" error. Without pinning, `make build` continues to use the floating tag (current behavior).
 ### Enterprise / Proxy
 
 Pass extra runtime flags via `SLAWDCODE_EXTRA_ARGS`:
