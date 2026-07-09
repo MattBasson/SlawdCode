@@ -46,10 +46,37 @@ function Get-UserHome {
     throw 'Could not determine user home directory. Set $HOME or $env:USERPROFILE.'
 }
 
+# M4: restrict credential file permissions to the current user on every run (best-effort).
+function Set-FileCurrentUserOnly([string]$FilePath) {
+    try {
+        $acl = Get-Acl $FilePath
+        $acl.SetAccessRuleProtection($true, $false)
+        $acl.Access | ForEach-Object { $acl.RemoveAccessRule($_) | Out-Null }
+        $rule = New-Object System.Security.AccessControl.FileSystemAccessRule(
+            [System.Security.Principal.WindowsIdentity]::GetCurrent().Name,
+            'FullControl', 'Allow'
+        )
+        $acl.AddAccessRule($rule)
+        Set-Acl $FilePath $acl
+    } catch { }  # non-Windows PS environments skip silently
+}
+
+# M5: refuse to operate on reparse points (symlinks / junctions).
+function Assert-NotReparsePoint([string]$Path) {
+    if (Test-Path $Path) {
+        $item = Get-Item $Path -Force -ErrorAction SilentlyContinue
+        if ($item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)) {
+            Write-Error "Reparse point detected at $Path — refusing to operate. Remove it and re-run."
+            exit 1
+        }
+    }
+}
+
 # --- Volume mounts ---
 $HostCwd = (Get-Location).Path
 $UserHomeDir = Get-UserHome
 $HostConfig = Join-Path $UserHomeDir '.claude'
+Assert-NotReparsePoint $HostConfig
 if (-not (Test-Path $HostConfig)) {
     New-Item -ItemType Directory -Path $HostConfig | Out-Null
 }
@@ -59,10 +86,12 @@ if (-not (Test-Path $HostConfig)) {
 # placeholder triggers a "Configuration Error / Unexpected EOF" prompt
 # before the auth flow can begin.
 $HostSession = Join-Path $UserHomeDir '.claude.json'
+Assert-NotReparsePoint $HostSession
 if (-not (Test-Path $HostSession) -or (Get-Item $HostSession).Length -eq 0) {
     # WriteAllText is BOM-free; Claude Code's JSON parser dislikes BOMs.
     [System.IO.File]::WriteAllText($HostSession, '{}')
 }
+Set-FileCurrentUserOnly $HostSession
 
 # Separately bind-mount ~/.claude/.credentials.json (the OAuth tokens
 # Claude Code writes after a successful 'auth login'). On Podman-Desktop /
@@ -72,9 +101,11 @@ if (-not (Test-Path $HostSession) -or (Get-Item $HostSession).Length -eq 0) {
 # creating the file and binding it directly forces the single-file mount
 # code path, the same one that already works for ~/.claude.json.
 $HostCreds = Join-Path $HostConfig '.credentials.json'
+Assert-NotReparsePoint $HostCreds
 if (-not (Test-Path $HostCreds) -or (Get-Item $HostCreds).Length -eq 0) {
     [System.IO.File]::WriteAllText($HostCreds, '{}')
 }
+Set-FileCurrentUserOnly $HostCreds
 
 # Convert Windows paths to a form both Podman Desktop and Docker Desktop
 # accept reliably: forward slashes with the drive letter intact, e.g.
@@ -134,8 +165,29 @@ if ($env:ANTHROPIC_API_KEY) {
 }
 
 # Extra runtime flags (e.g. proxy, custom CA)
+# M3: reject flags that would undo container hardening.
+# M6: tokenize via PSParser so quoted args with spaces survive intact.
 if ($env:SLAWDCODE_EXTRA_ARGS) {
-    $RunArgs += ($env:SLAWDCODE_EXTRA_ARGS -split '\s+' | Where-Object { $_ -ne '' })
+    $deniedPattern = '--privileged|--cap-add|--user[\s=]+0|--user[\s=]+root|--network[\s=]+host|--pid[\s=]+host|--ipc[\s=]+host|--userns[\s=]+host|--security-opt[\s=]+seccomp=unconfined|--security-opt[\s=]+apparmor=unconfined|--security-opt[\s=]+label=disable'
+    if ($env:SLAWDCODE_EXTRA_ARGS -imatch $deniedPattern) {
+        if ($env:SLAWDCODE_ALLOW_UNSAFE_EXTRA_ARGS -eq '1') {
+            Write-Warning 'SLAWDCODE_ALLOW_UNSAFE_EXTRA_ARGS=1 — security-hardening bypass active.'
+        } else {
+            Write-Error 'SLAWDCODE_EXTRA_ARGS contains a flag that undoes container hardening. Set SLAWDCODE_ALLOW_UNSAFE_EXTRA_ARGS=1 to override.'
+            exit 1
+        }
+    }
+    $tokens = [System.Management.Automation.PSParser]::Tokenize(
+        $env:SLAWDCODE_EXTRA_ARGS, [ref]$null
+    ) | Where-Object {
+        $_.Type -in @(
+            [System.Management.Automation.PSTokenType]::CommandArgument,
+            [System.Management.Automation.PSTokenType]::String,
+            [System.Management.Automation.PSTokenType]::Command,
+            [System.Management.Automation.PSTokenType]::Number
+        )
+    } | ForEach-Object { $_.Content }
+    $RunArgs += $tokens
 }
 
 $RunArgs += $Image
@@ -162,8 +214,12 @@ if ($env:SLAWDCODE_DEBUG -match '^(?i:1|true|yes)$') {
         $info = Get-Item $HostCreds
         Write-Host ("HostCreds size:   {0} bytes, last write: {1}" -f $info.Length, $info.LastWriteTime)
     }
+    # M7: redact API key value so it doesn't appear in debug logs.
+    $redactedArgs = $RunArgs | ForEach-Object {
+        if ($_ -match '^ANTHROPIC_API_KEY=') { 'ANTHROPIC_API_KEY=***' } else { $_ }
+    }
     Write-Host "Command:"
-    Write-Host ("  {0} {1}" -f $Runtime, ($RunArgs -join ' '))
+    Write-Host ("  {0} {1}" -f $Runtime, ($redactedArgs -join ' '))
     Write-Host '-----------------------' -ForegroundColor Cyan
 }
 
