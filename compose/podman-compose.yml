@@ -1,4 +1,3 @@
-version: "3.8"
 # SlawdCode — convenience compose file
 # Usage: podman-compose run --rm claude [claude-args]
 #    or: docker compose run --rm claude [claude-args]

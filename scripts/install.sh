@@ -5,7 +5,9 @@
 set -euo pipefail
 
 INSTALL_DIR="${1:-${HOME}/.local/bin}"
-REPO_RAW="https://raw.githubusercontent.com/MattBasson/SlawdCode/main"
+# L1: honor SLAWDCODE_REF so piped installs can target a specific tag/commit.
+REPO_REF="${SLAWDCODE_REF:-main}"
+REPO_RAW="https://raw.githubusercontent.com/MattBasson/SlawdCode/${REPO_REF}"
 
 echo "SlawdCode Installer"
 echo "==================="
@@ -13,10 +15,18 @@ echo "==================="
 # Ensure install directory exists
 mkdir -p "$INSTALL_DIR"
 
-# Download wrapper scripts
-echo "Downloading scripts to $INSTALL_DIR ..."
-curl -fsSL "${REPO_RAW}/scripts/claude"         -o "${INSTALL_DIR}/claude"
-curl -fsSL "${REPO_RAW}/scripts/slawdcode-auth" -o "${INSTALL_DIR}/slawdcode-auth"
+# L2: if this script is running from a local checkout (sibling directory),
+# copy the local wrappers instead of downloading from the network.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+if [ -f "${SCRIPT_DIR}/claude" ] && [ -f "${SCRIPT_DIR}/slawdcode-auth" ]; then
+    echo "Using local scripts from ${SCRIPT_DIR} ..."
+    cp "${SCRIPT_DIR}/claude"         "${INSTALL_DIR}/claude"
+    cp "${SCRIPT_DIR}/slawdcode-auth" "${INSTALL_DIR}/slawdcode-auth"
+else
+    echo "Downloading scripts (ref: ${REPO_REF}) to $INSTALL_DIR ..."
+    curl -fsSL "${REPO_RAW}/scripts/claude"         -o "${INSTALL_DIR}/claude"
+    curl -fsSL "${REPO_RAW}/scripts/slawdcode-auth" -o "${INSTALL_DIR}/slawdcode-auth"
+fi
 chmod +x "${INSTALL_DIR}/claude" "${INSTALL_DIR}/slawdcode-auth"
 
 echo ""

@@ -7,6 +7,14 @@ set -euo pipefail
 IMAGE="${SLAWDCODE_IMAGE:-slawdcode:latest}"
 RUNTIME="${SLAWDCODE_RUNTIME:-}"
 
+# L11: soft warning if SLAWDCODE_IMAGE looks like it came from an unexpected registry.
+case "$IMAGE" in
+    slawdcode:*|slawdcode@*) ;;
+    *)
+        echo "Warning: SLAWDCODE_IMAGE='$IMAGE' does not start with 'slawdcode/' — using a custom image." >&2
+        ;;
+esac
+
 # Auto-detect container runtime (prefer podman for rootless operation)
 if [ -z "$RUNTIME" ]; then
     if command -v podman &>/dev/null; then
@@ -120,6 +128,29 @@ case "${SLAWDCODE_DEBUG:-}" in
         ;;
 esac
 
+# --- L4: Resource limits ---
+# Default to sane caps; override or disable with SLAWDCODE_PIDS_LIMIT / SLAWDCODE_MEMORY.
+# Set either to 'none' to remove the limit entirely.
+_PIDS_LIMIT="${SLAWDCODE_PIDS_LIMIT:-512}"
+_MEMORY="${SLAWDCODE_MEMORY:-4g}"
+RESOURCE_ARGS=()
+[ "$_PIDS_LIMIT" != "none" ] && RESOURCE_ARGS+=(--pids-limit "$_PIDS_LIMIT")
+[ "$_MEMORY"     != "none" ] && RESOURCE_ARGS+=(--memory "$_MEMORY")
+
+# --- L5: Read-only rootfs (opt-in) ---
+# Set SLAWDCODE_READONLY_ROOTFS=1 to make the container rootfs read-only and
+# overlay writable tmpfs mounts on /tmp and /home/claude/.cache.
+ROOTFS_ARGS=()
+case "${SLAWDCODE_READONLY_ROOTFS:-}" in
+    1|true|TRUE|yes|YES)
+        ROOTFS_ARGS+=(
+            --read-only
+            --tmpfs /tmp:mode=1777
+            --tmpfs /home/claude/.cache:mode=0700
+        )
+        ;;
+esac
+
 # --- Run ---
 exec "$RUNTIME" run \
     --rm \
@@ -127,6 +158,8 @@ exec "$RUNTIME" run \
     --tty \
     "${ENV_ARGS[@]}" \
     "${VOLUME_ARGS[@]}" \
+    "${RESOURCE_ARGS[@]}" \
+    "${ROOTFS_ARGS[@]}" \
     --workdir /workspace \
     --security-opt no-new-privileges \
     --cap-drop ALL \
